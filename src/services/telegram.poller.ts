@@ -135,14 +135,25 @@ export const handleMessage = async (message: any) => {
             // Cleanup old session if any
             if (session) await conversationService.deleteSession(chatId);
 
-            const results = chrono.parse(text);
+            // Fix: Interpret all inputs as IST (UTC+05:30)
+            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+
+            // Pass nowIST as reference so "tomorrow" means "tomorrow in IST"
+            const results = chrono.parse(text, nowIST);
+
             if (results.length === 0) {
                 await sendMessage(chatId, "❌ Could not detect a valid date.\nExample: /add Buy milk tomorrow 5pm");
                 return;
             }
 
             const dateResult = results[0];
-            const dueDate = dateResult.start.date();
+
+            // The parsed date 'looks' like IST (e.g., 5 PM) but is stored as UTC (17:00 Z) 
+            // We must shift it back to get the real UTC instant (11:30 Z)
+            // UNLESS the user explicitly specified a timezone (handle simpler case first)
+            const parsedFaceValue = dateResult.start.date();
+            const dueDate = new Date(parsedFaceValue.getTime() - IST_OFFSET_MS);
 
             // Safety: Ensure future date?
             if (dueDate < new Date()) {
