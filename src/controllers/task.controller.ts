@@ -43,6 +43,12 @@ export async function getTasks(
 ): Promise<void> {
     try {
         const tasks = await taskService.getTasksByUser(req.userId!);
+
+        if (tasks.length > 0) {
+            console.log("[DEBUG_CORRUPTION] API GetTasks Sample:", tasks[0].dueDate);
+            console.log("[DEBUG_CORRUPTION] API GetTasks ISO:", tasks[0].dueDate.toISOString());
+        }
+
         res.status(200).json({ success: true, data: tasks });
     } catch (error) {
         next(error);
