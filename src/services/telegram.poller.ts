@@ -136,11 +136,13 @@ export const handleMessage = async (message: any) => {
             if (session) await conversationService.deleteSession(chatId);
 
             // Fix: Interpret all inputs as IST (UTC+05:30)
-            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-            const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+            // const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+            // const nowIST = new Date(Date.now() + IST_OFFSET_MS);
 
             // Pass nowIST as reference so "tomorrow" means "tomorrow in IST"
-            const results = chrono.parse(text, nowIST);
+            // const results = chrono.parse(text, nowIST);
+            // DEBUG: Reverting to standard parse to see raw behavior
+            const results = chrono.parse(text);
 
             if (results.length === 0) {
                 await sendMessage(chatId, "❌ Could not detect a valid date.\nExample: /add Buy milk tomorrow 5pm");
@@ -153,7 +155,12 @@ export const handleMessage = async (message: any) => {
             // We must shift it back to get the real UTC instant (11:30 Z)
             // UNLESS the user explicitly specified a timezone (handle simpler case first)
             const parsedFaceValue = dateResult.start.date();
-            const dueDate = new Date(parsedFaceValue.getTime() - IST_OFFSET_MS);
+            // const dueDate = new Date(parsedFaceValue.getTime() - IST_OFFSET_MS);
+            const dueDate = parsedFaceValue;
+
+            console.log("[DEBUG_TZ] Text:", text);
+            console.log("[DEBUG_TZ] Chrono Parsed (Local/UTC):", parsedFaceValue.toString());
+            console.log("[DEBUG_TZ] Final DueDate (ISO):", dueDate.toISOString());
 
             // Safety: Ensure future date?
             if (dueDate < new Date()) {
