@@ -44,9 +44,17 @@ export const sendReminderNotification = async (task: Task, user: User & { telegr
     if (!user.telegramChatId) return;
 
     try {
-        const dueDateFormatted = new Date(task.dueDate).toLocaleString();
+        const dueDateFormatted = new Date(task.dueDate).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+            hour12: true,
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+        });
 
-        const isOverdue = new Date() > new Date(task.dueDate);
+        const isOverdue = Date.now() > new Date(task.dueDate).getTime();
         const header = isOverdue ? "🚨 <b>OVERDUE</b>" : "🔔 <b>REMINDER</b>";
 
         // Truncate description if too long
