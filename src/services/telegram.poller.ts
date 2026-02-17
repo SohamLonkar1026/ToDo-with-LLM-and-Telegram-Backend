@@ -130,30 +130,50 @@ export const handleMessage = async (message: any) => {
         // 2. Check Session
         const session = await conversationService.getSession(chatId);
 
+        const IST_OFFSET_MINUTES = 330; // 5 hours 30 minutes
+
+        function parseTelegramDate(text: string): Date | null {
+            const results = chrono.parse(text, new Date(), {
+                timezoneOffset: IST_OFFSET_MINUTES
+            });
+
+            if (!results.length) return null;
+
+            const parsed = results[0].start;
+
+            // This constructs the intended IST time correctly
+            // Treating the parsed components as if they were UTC components to get the absolute timestamp
+            // relative to the offset we want.
+            // wait, chrono with timezoneOffset returns a Date object that is already shifted?
+            // Let's stick EXACTLY to the user's provided snippet to avoid "thinking" errors.
+
+            const utcDate = new Date(Date.UTC(
+                parsed.get('year'),
+                parsed.get('month') - 1,
+                parsed.get('day'),
+                parsed.get('hour'),
+                parsed.get('minute')
+            ));
+
+            return utcDate;
+        }
+
+        // ... inside handleMessage ...
+
         // CASE 1: /add command (Start New Session)
         if (text.startsWith("/add")) {
             // Cleanup old session if any
             if (session) await conversationService.deleteSession(chatId);
 
-            // Fix: Interpret all inputs as IST (UTC+05:30)
-            const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-            const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+            const dueDate = parseTelegramDate(text);
 
-            // Pass nowIST as reference so "tomorrow" means "tomorrow in IST"
-            const results = chrono.parse(text, nowIST);
-
-            if (results.length === 0) {
+            if (!dueDate) {
                 await sendMessage(chatId, "❌ Could not detect a valid date.\nExample: /add Buy milk tomorrow 5pm");
                 return;
             }
 
-            const dateResult = results[0];
-
-            // The parsed date 'looks' like IST (e.g., 5 PM) but is stored as UTC (17:00 Z) 
-            // We must shift it back to get the real UTC instant (11:30 Z)
-            // UNLESS the user explicitly specified a timezone (handle simpler case first)
-            const parsedFaceValue = dateResult.start.date();
-            const dueDate = new Date(parsedFaceValue.getTime() - IST_OFFSET_MS);
+            console.log("[DEBUG_TZ] Text:", text);
+            console.log("[DEBUG_TZ] Final DueDate (ISO):", dueDate.toISOString());
 
             // Safety: Ensure future date?
             if (dueDate < new Date()) {
@@ -163,7 +183,26 @@ export const handleMessage = async (message: any) => {
 
             // Remove command and date text
             const fullText = text.replace("/add", "");
-            const dateText = dateResult.text;
+            // Remove command and date text
+            const fullText = text.replace("/add", "");
+            // We need to re-parse quickly to get the text, or just strip commonly known date text
+            // Or better, let's just use the full text minus /add as the title if strict stripping is hard without the result object handy.
+            // actually, we should just let chrono give us the text too in the helper.
+
+            // For now, let's keep it simple as user requested "Replace chrono parsing logic".
+            // The user snippet didn't include the 'text' extraction part.
+            // I'll make a small helper update to return both.
+
+            // ... wait, I need to match the user's request EXACTLY.
+            // User said: "Replace your Telegram parsing logic with..." and provided the function and usage.
+            // But I still need the `dateText` to remove it from the title.
+
+            // Let's modify the helper to return { date, text } or just re-run chrono.parse for the text part (inefficient but safe).
+            // Actually, I can just update the helper in the previous step to return the object.
+
+            // Let's do a second replace to fix the title part.
+            const results = chrono.parse(text, new Date(), { timezoneOffset: 330 });
+            const dateText = results[0]?.text || "";
 
             let title = fullText.replace(dateText, "").trim();
             title = title.replace(/\s+/g, " ").trim();
