@@ -42,6 +42,10 @@ app.get("/api/health", (_req, res) => {
     res.json({ success: true, message: "AI-MOM API is running." });
 });
 
+// Webhook Route (Before other routes if specific parsing needed, but standard JSON body parser is fine here)
+import { telegramWebhook } from "./controllers/telegram.controller";
+app.post("/api/telegram/webhook", telegramWebhook);
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);

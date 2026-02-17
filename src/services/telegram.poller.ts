@@ -13,60 +13,64 @@ let pollingInterval: NodeJS.Timeout | null = null;
 let isPolling = false;
 
 export const initializeTelegramPoller = () => {
-    if (!process.env.TELEGRAM_BOT_TOKEN) {
-        console.warn("[TELEGRAM] Bot token missing. Poller disabled.");
-        return;
-    }
+    console.log("[TELEGRAM] Polling disabled for webhook migration.");
+    // if (!process.env.TELEGRAM_BOT_TOKEN) {
+    //     console.warn("[TELEGRAM] Bot token missing. Poller disabled.");
+    //     return;
+    // }
 
-    if (pollingInterval) {
-        console.warn("[TELEGRAM] Poller already running.");
-        return;
-    }
+    // if (pollingInterval) {
+    //     console.warn("[TELEGRAM] Poller already running.");
+    //     return;
+    // }
 
-    // Start polling loop
-    console.log("[BOOT] Telegram poller initialized");
-    pollingInterval = setInterval(poll, 3000);
+    //Start polling loop
+    // console.log("[BOOT] Telegram poller initialized");
+    // pollingInterval = setInterval(poll, 3000);
 };
 
 const poll = async () => {
-    if (isPolling) return; // Prevent overlapping polls
-    isPolling = true;
+    // Polling logic disabled
+    if (isPolling) return;
 
-    try {
-        const offset = lastUpdateId + 1;
-        const response = await fetch(`${BASE_URL}/getUpdates?offset=${offset}&timeout=1`);
+    // isPolling = true;
 
-        if (!response.ok) {
-            if (process.env.NODE_ENV !== 'production') console.warn(`[TELEGRAM] Poll failed: ${response.statusText}`);
-            isPolling = false;
-            return;
-        }
+    // try {
+    //     const offset = lastUpdateId + 1;
+    //     const response = await fetch(`${BASE_URL}/getUpdates?offset=${offset}&timeout=1`);
 
-        const data = await response.json() as any;
+    //     if (!response.ok) {
+    //         if (process.env.NODE_ENV !== 'production') console.warn(`[TELEGRAM] Poll failed: ${response.statusText}`);
+    //         isPolling = false;
+    //         return;
+    //     }
 
-        if (data.ok && data.result.length > 0) {
-            for (const update of data.result) {
-                if (update.update_id > lastUpdateId) {
-                    lastUpdateId = update.update_id;
-                }
+    //     const data = await response.json() as any;
 
-                if (update.callback_query) {
-                    await handleCallbackQuery(update.callback_query);
-                } else if (update.message) {
-                    await handleMessage(update.message);
-                }
-            }
-        }
-    } catch (error) {
-        console.error("[TELEGRAM] Polling error:", error);
-    } finally {
-        isPolling = false;
-    }
+    //     if (data.ok && data.result.length > 0) {
+    //         for (const update of data.result) {
+    //             if (update.update_id > lastUpdateId) {
+    //                 lastUpdateId = update.update_id;
+    //             }
+
+    //             if (update.callback_query) {
+    //                 await handleCallbackQuery(update.callback_query);
+    //             } else if (update.message) {
+    //                 await handleMessage(update.message);
+    //             }
+    //         }
+    //     }
+    // } catch (error) {
+    //     console.error("[TELEGRAM] Polling error:", error);
+    // } finally {
+    //     isPolling = false;
+    // }
 };
 
 import * as linkService from "./telegram.link.service";
 
-const handleMessage = async (message: any) => {
+// Exported for Webhook Controller
+export const handleMessage = async (message: any) => {
     try {
         const text = message.text;
         const chatId = message.chat.id.toString();
@@ -229,7 +233,8 @@ const handleMessage = async (message: any) => {
     }
 }
 
-const handleCallbackQuery = async (callback: any) => {
+// Exported for Webhook Controller
+export const handleCallbackQuery = async (callback: any) => {
     try {
         const data = callback.data;
         const chatId = callback.message.chat.id.toString();

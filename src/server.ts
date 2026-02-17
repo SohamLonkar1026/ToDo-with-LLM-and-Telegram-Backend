@@ -33,12 +33,12 @@ async function startServer() {
         server.setTimeout(30000);
 
         // 4. Initialize Telegram Poller
-        initializeTelegramPoller();
+        // initializeTelegramPoller();
 
         // Graceful Shutdown
         process.on('SIGTERM', async () => {
             console.log('[SHUTDOWN] Closing server...');
-            stopTelegramPoller();
+            // stopTelegramPoller();
             server.close(async () => {
                 await prisma.$disconnect();
                 console.log('[SHUTDOWN] Server closed');
