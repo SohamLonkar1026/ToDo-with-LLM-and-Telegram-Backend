@@ -18,6 +18,7 @@ async function startServer() {
         if (env.NODE_ENV !== 'production') {
             console.log("✅ [BOOT] Database connected");
         }
+        console.log('[PRISMA_SINGLETON_ACTIVE]');
 
         // 2. Initialize Scheduler (Once)
         startReminderJob();

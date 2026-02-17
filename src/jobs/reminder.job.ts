@@ -19,40 +19,18 @@ export const startReminderJob = () => {
     console.log("[SCHEDULER] Initializing Reminder Job...");
 
     // Schedule: Every minute (Robust cron syntax)
+    // Schedule: Every minute (Robust cron syntax)
     // Concurrency Guard: Ensure only one instance runs at a time
     cron.schedule("* * * * *", async () => {
-        if (isJobRunning) {
-            if (process.env.NODE_ENV !== 'production') {
-                console.warn("[SCHEDULER] Skipping execution: Previous job still running.");
-            }
-            return;
-        }
-
-        // Lock acquisition
+        if (isJobRunning) return;
         isJobRunning = true;
-        totalRuns++;
-        lastRunAt = new Date();
-        const startTime = Date.now();
 
         try {
-            if (process.env.NODE_ENV !== 'production') {
-                console.log("[SCHEDULER] Starting reminder check...");
-            }
             await checkAndTriggerReminders();
-            // Success: Clear any previous error
-            lastError = null;
-        } catch (error: any) {
-            console.error("[SCHEDULER] Error during execution:", error);
-            // Failure: Capture error message
-            lastError = error instanceof Error ? error.message : String(error);
+        } catch (err) {
+            console.error('[REMINDER_CRON_ERROR]', err);
         } finally {
-            // Calculate duration regardless of success/failure
-            lastDurationMs = Date.now() - startTime;
             isJobRunning = false;
-            // Only log lock release in dev, it's spammy
-            if (process.env.NODE_ENV !== 'production') {
-                console.log("[SCHEDULER] Job finished. Lock released.");
-            }
         }
     });
 
