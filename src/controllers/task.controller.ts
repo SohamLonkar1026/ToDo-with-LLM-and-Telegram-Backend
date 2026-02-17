@@ -18,6 +18,9 @@ export async function createTask(
             return;
         }
 
+        console.log("[DEBUG_API] Raw Body dueDate:", dueDate);
+        console.log("[DEBUG_API] Parsed Date ISO:", new Date(dueDate).toISOString());
+
         const task = await taskService.createTask(req.userId!, {
             title,
             description,

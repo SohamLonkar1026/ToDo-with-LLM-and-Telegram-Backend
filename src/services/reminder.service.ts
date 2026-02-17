@@ -79,6 +79,12 @@ export const checkAndTriggerReminders = async () => {
                 for (const stage of REMINDER_STAGES) {
                     const stageTime = new Date(task.dueDate.getTime() - stage.offsetMs);
 
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`[DEBUG_SCHEDULER] Task ${task.id} Due: ${task.dueDate.toISOString()}`);
+                        console.log(`[DEBUG_SCHEDULER] Stage ${stage.key} Time: ${stageTime.toISOString()}`);
+                        console.log(`[DEBUG_SCHEDULER] Now: ${currentTime.toISOString()}`);
+                    }
+
                     // 🛡️ Guard 2 (CreatedAt): No retroactive reminders
                     if (stageTime < task.createdAt) continue;
 

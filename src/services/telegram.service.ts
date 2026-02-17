@@ -44,6 +44,11 @@ export const sendReminderNotification = async (task: Task, user: User & { telegr
     if (!user.telegramChatId) return;
 
     try {
+        console.log("[DEBUG_TELEGRAM] RAW DB VALUE:", task.dueDate);
+        console.log("[DEBUG_TELEGRAM] AS ISO:", new Date(task.dueDate).toISOString());
+        console.log("[DEBUG_TELEGRAM] AS IST:", new Date(task.dueDate).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }));
+        console.log("[DEBUG_TELEGRAM] SERVER DEFAULT:", new Date(task.dueDate).toLocaleString());
+
         const dueDateFormatted = new Date(task.dueDate).toLocaleString("en-IN", {
             timeZone: "Asia/Kolkata",
             hour12: true,
