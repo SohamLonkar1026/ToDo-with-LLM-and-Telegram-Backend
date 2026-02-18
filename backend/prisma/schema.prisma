@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String              @id @default(cuid())
+  email                 String              @unique
+  password              String
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  notifications         Notification[]
+  recurringTemplates    RecurringTemplate[]
+  tasks                 Task[]
+  telegramChatId        String?             @unique
+  telegramLinkCode      String?             @unique
+  telegramLinkExpiresAt DateTime?
+}
+
+model Task {
+  id                    String             @id @default(uuid())
+  title                 String
+  description           String?
+  dueDate               DateTime
+  estimatedMinutes      Int
+  priority              Priority           @default(MEDIUM)
+  status                Status             @default(PENDING)
+  reminderOffsetMinutes Int                @default(60)
+  userId                String
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  lastReminderSentAt    DateTime?
+  reminderStagesSent    Json?              @default("[]")
+  snoozedUntil          DateTime?
+  recurringTemplateId   String?
+  notifications         Notification[]
+  recurringTemplate     RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id])
+  user                  User               @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model RecurringTemplate {
+  id               String         @id @default(uuid())
+  userId           String
+  title            String
+  estimatedMinutes Int?
+  recurrenceType   RecurrenceType
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  user             User           @relation(fields: [userId], references: [id])
+  tasks            Task[]
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  taskId    String
+  message   String
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  type      NotificationType
+  task      Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Status {
+  PENDING
+  COMPLETED
+}
+
+enum NotificationType {
+  REMINDER
+  OVERDUE
+}
+
+enum RecurrenceType {
+  DAILY
+  MONTHLY
+  YEARLY
+}
+
+model ConversationSession {
+  id                     String    @id @default(cuid())
+  telegramChatId         String?   @unique
+  telegramLinkCode       String?   @unique
+  telegramLinkExpiresAt  DateTime?
+  step                   String
+  partialData            Json
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
