@@ -1,3 +1,4 @@
+import { formatInTimeZone } from "date-fns-tz";
 import env from "../config/env";
 import prisma from "../utils/prisma";
 import * as conversationService from "./conversation.service";
@@ -170,7 +171,7 @@ export const handleMessage = async (message: any) => {
                 dueDate: dueDate.toISOString()
             });
 
-            await sendMessage(chatId, `📝 <b>Task:</b> ${title}\n📅 <b>Due:</b> ${dueDate.toLocaleString()}\n\nPlease describe this task (or type 'skip' to leave empty).`);
+            await sendMessage(chatId, `📝 <b>Task:</b> ${title}\n📅 <b>Due:</b> ${formatInTimeZone(dueDate, "Asia/Kolkata", "MMM d, h:mm a")}\n\nPlease describe this task (or type 'skip' to leave empty).`);
             return;
         }
 
