@@ -13,6 +13,8 @@ import aiRoutes from "./routes/ai.routes";
 
 const app = express();
 
+console.log("🔥 DEPLOY VERSION: CORS FIX ACTIVE 🔥");
+
 // ----------------------------------------------------------------------
 // 🚨 CRITICAL: CORS MUST BE THE FIRST MIDDLEWARE
 // ----------------------------------------------------------------------
