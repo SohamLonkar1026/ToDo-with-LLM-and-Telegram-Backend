@@ -20,6 +20,7 @@ export const generateLink = async (req: AuthRequest, res: Response) => {
 
 export const telegramWebhook = async (req: Request, res: Response) => {
     try {
+        console.log("🚨 TELEGRAM WEBHOOK CONTROLLER ACTIVE");
         const update = req.body;
 
         if (update.message) {

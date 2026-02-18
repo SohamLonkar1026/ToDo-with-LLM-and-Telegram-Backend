@@ -1,10 +1,10 @@
 import env from "../config/env";
 import prisma from "../utils/prisma";
-import * as chrono from "chrono-node";
 import * as conversationService from "./conversation.service";
 import * as navigationService from "./telegram.navigation";
 import { sendMessage } from "./telegram.service";
 import { Priority } from "@prisma/client";
+import { parseTelegramDate } from "../utils/telegramDateParser";
 
 const BASE_URL = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -71,6 +71,7 @@ import * as linkService from "./telegram.link.service";
 
 // Exported for Webhook Controller
 export const handleMessage = async (message: any) => {
+    console.log("🚨 TELEGRAM HANDLER FILE ACTIVE");
     try {
         const text = message.text;
         const chatId = message.chat.id.toString();
@@ -130,47 +131,25 @@ export const handleMessage = async (message: any) => {
         // 2. Check Session
         const session = await conversationService.getSession(chatId);
 
-        const IST_OFFSET_MINUTES = 330; // 5 hours 30 minutes
-
-        function parseTelegramDate(text: string): Date | null {
-            const results = chrono.parse(text, new Date(), {
-                timezoneOffset: IST_OFFSET_MINUTES
-            });
-
-            if (!results.length) return null;
-
-            const parsed = results[0].start;
-
-            // This constructs the intended IST time correctly
-            // Treating the parsed components as if they were UTC components to get the absolute timestamp
-            // relative to the offset we want.
-            // wait, chrono with timezoneOffset returns a Date object that is already shifted?
-            // Let's stick EXACTLY to the user's provided snippet to avoid "thinking" errors.
-
-            const utcDate = new Date(Date.UTC(
-                parsed.get('year'),
-                parsed.get('month') - 1,
-                parsed.get('day'),
-                parsed.get('hour'),
-                parsed.get('minute')
-            ));
-
-            return utcDate;
-        }
-
-        // ... inside handleMessage ...
-
         // CASE 1: /add command (Start New Session)
         if (text.startsWith("/add")) {
             // Cleanup old session if any
             if (session) await conversationService.deleteSession(chatId);
 
-            const dueDate = parseTelegramDate(text);
+            const parsedDateResult = parseTelegramDate(text);
 
-            if (!dueDate) {
+            if (!parsedDateResult) {
                 await sendMessage(chatId, "❌ Could not detect a valid date.\nExample: /add Buy milk tomorrow 5pm");
                 return;
             }
+
+            const dueDate = parsedDateResult.date;
+
+            // Clean up the title: remove "/add" and the date text
+            // remainingText from parser already removed the date text
+            // We just need to remove "/add" from it
+            let title = parsedDateResult.remainingText.replace("/add", "").trim();
+            title = title.replace(/\s+/g, " ").trim();
 
             console.log("[DEBUG_TZ] Text:", text);
             console.log("[DEBUG_TZ] Final DueDate (ISO):", dueDate.toISOString());
@@ -180,32 +159,6 @@ export const handleMessage = async (message: any) => {
                 await sendMessage(chatId, "❌ Date must be in the future.");
                 return;
             }
-
-            // Remove command and date text
-            const fullText = text.replace("/add", "");
-            // Remove command and date text
-            const fullText = text.replace("/add", "");
-            // We need to re-parse quickly to get the text, or just strip commonly known date text
-            // Or better, let's just use the full text minus /add as the title if strict stripping is hard without the result object handy.
-            // actually, we should just let chrono give us the text too in the helper.
-
-            // For now, let's keep it simple as user requested "Replace chrono parsing logic".
-            // The user snippet didn't include the 'text' extraction part.
-            // I'll make a small helper update to return both.
-
-            // ... wait, I need to match the user's request EXACTLY.
-            // User said: "Replace your Telegram parsing logic with..." and provided the function and usage.
-            // But I still need the `dateText` to remove it from the title.
-
-            // Let's modify the helper to return { date, text } or just re-run chrono.parse for the text part (inefficient but safe).
-            // Actually, I can just update the helper in the previous step to return the object.
-
-            // Let's do a second replace to fix the title part.
-            const results = chrono.parse(text, new Date(), { timezoneOffset: 330 });
-            const dateText = results[0]?.text || "";
-
-            let title = fullText.replace(dateText, "").trim();
-            title = title.replace(/\s+/g, " ").trim();
 
             if (!title) {
                 await sendMessage(chatId, "❌ Please provide a task title.\nExample: /add Buy milk tomorrow");
@@ -260,6 +213,7 @@ export const handleMessage = async (message: any) => {
                 const urgency = urgencyRaw.toUpperCase() as Priority;
 
                 // Create Task
+                console.log("[DEBUG_TZ] Creating task with DueDate:", data.dueDate);
                 await prisma.task.create({
                     data: {
                         userId: user.id,
@@ -271,6 +225,8 @@ export const handleMessage = async (message: any) => {
                         status: "PENDING"
                     }
                 });
+
+                console.log("FINAL STORED UTC:", new Date(data.dueDate).toISOString());
 
                 await conversationService.deleteSession(chatId);
                 await sendMessage(chatId, "✅ <b>Task Created!</b>");
