@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { CheckCircle, Circle, Trash2, Clock, AlertTriangle } from 'lucide-react';
 import Button from '../ui/Button';
 
@@ -25,7 +25,7 @@ export default function TaskCard({ task, onComplete, onDelete }: TaskCardProps) 
     if (Math.random() < 0.05) { // Sample ~5% or remove check for full spam
         console.log("[DEBUG_DASHBOARD_RENDER] Received:", task.dueDate);
         console.log("[DEBUG_DASHBOARD_RENDER] Interpreted:", new Date(task.dueDate));
-        console.log("[DEBUG_DASHBOARD_RENDER] Formatted:", format(new Date(task.dueDate), 'MMM d, h:mm a'));
+        console.log("[DEBUG_DASHBOARD_RENDER] Formatted:", formatInTimeZone(new Date(task.dueDate), 'Asia/Kolkata', 'MMM d, h:mm a'));
     }
 
     const priorityColors = {
@@ -63,7 +63,7 @@ export default function TaskCard({ task, onComplete, onDelete }: TaskCardProps) 
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
-                        <span>{format(new Date(task.dueDate), 'MMM d, h:mm a')}</span>
+                        <span>{formatInTimeZone(new Date(task.dueDate), 'Asia/Kolkata', 'MMM d, h:mm a')}</span>
                     </div>
                     <div className="flex items-center gap-1">
                         <AlertTriangle className="w-4 h-4" />

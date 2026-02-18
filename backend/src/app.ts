@@ -46,12 +46,15 @@ app.get("/api/health", (_req, res) => {
 import { telegramWebhook } from "./controllers/telegram.controller";
 app.post("/api/telegram/webhook", telegramWebhook);
 
+import aiRoutes from "./routes/ai.routes";
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/recurring", recurringRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/telegram", telegramRoutes);
+app.use("/api/ai", aiRoutes);
 
 // Centralized error handler
 app.use(errorMiddleware);

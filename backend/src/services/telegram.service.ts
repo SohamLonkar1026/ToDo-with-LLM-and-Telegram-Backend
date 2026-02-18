@@ -1,13 +1,13 @@
+import { formatInTimeZone } from "date-fns-tz";
 import env from "../config/env";
 import { Task, User } from "@prisma/client";
 
-// Define strict types for the Telegram API responses/payloads if needed, 
-// or use 'any' carefully where strict typing is overkill for external API calls 
-// that we don't control, but we will try to be type-safe.
+// ... (existing constants)
 
 const BASE_URL = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
 export const sendMessage = async (chatId: string, text: string, inlineKeyboard?: any) => {
+    // ... (logic remains same)
     if (!process.env.TELEGRAM_BOT_TOKEN) {
         console.warn("[TELEGRAM] Bot token missing. Message not sent.");
         return;
@@ -46,18 +46,13 @@ export const sendReminderNotification = async (task: Task, user: User & { telegr
     try {
         console.log("[DEBUG_TELEGRAM] RAW DB VALUE:", task.dueDate);
         console.log("[DEBUG_TELEGRAM] AS ISO:", new Date(task.dueDate).toISOString());
-        console.log("[DEBUG_TELEGRAM] AS IST:", new Date(task.dueDate).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }));
-        console.log("[DEBUG_TELEGRAM] SERVER DEFAULT:", new Date(task.dueDate).toLocaleString());
 
-        const dueDateFormatted = new Date(task.dueDate).toLocaleString("en-IN", {
-            timeZone: "Asia/Kolkata",
-            hour12: true,
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-        });
+        const dueDateFormatted = formatInTimeZone(
+            new Date(task.dueDate),
+            "Asia/Kolkata",
+            "MMM d, h:mm a"
+        );
+        console.log("[DEBUG_TELEGRAM] AS IST:", dueDateFormatted);
 
         const isOverdue = Date.now() > new Date(task.dueDate).getTime();
         const header = isOverdue ? "🚨 <b>OVERDUE</b>" : "🔔 <b>REMINDER</b>";

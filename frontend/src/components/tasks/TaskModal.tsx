@@ -28,11 +28,12 @@ export default function TaskModal({ isOpen, onClose, onSuccess }: TaskModalProps
         setLoading(true);
         try {
             console.log("[DEBUG_DASHBOARD_CREATE] Raw Input:", formData.dueDate);
-            console.log("[DEBUG_DASHBOARD_CREATE] Sending ISO:", new Date(formData.dueDate).toISOString());
+            const isoDueDate = new Date(formData.dueDate).toISOString();
+            console.log("[DEBUG_DASHBOARD_CREATE] Sending ISO dueDate:", isoDueDate);
 
             await api.post('/tasks', {
                 ...formData,
-                dueDate: new Date(formData.dueDate).toISOString()
+                dueDate: isoDueDate
             });
             onSuccess();
             onClose();

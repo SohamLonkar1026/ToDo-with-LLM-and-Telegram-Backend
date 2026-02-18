@@ -1,4 +1,5 @@
 
+import { formatInTimeZone } from "date-fns-tz";
 import prisma from "../utils/prisma";
 import { sendMessage } from "./telegram.service";
 import { User } from "@prisma/client";
@@ -68,7 +69,7 @@ export const handleNavigationCallback = async (callback: any, user: User) => {
         let msg = "🔥 <b>High Priority Tasks</b>\n\n";
         top10.forEach((t, i) => {
             const icon = t.priority === "HIGH" ? "🔴" : t.priority === "MEDIUM" ? "🟡" : "🟢";
-            msg += `${i + 1}. ${icon} <b>${t.title}</b>\n   Due: ${new Date(t.dueDate).toLocaleDateString()}\n`;
+            msg += `${i + 1}. ${icon} <b>${t.title}</b>\n   Due: ${formatInTimeZone(t.dueDate, "Asia/Kolkata", "MMM d")}\n`;
         });
         await sendMessage(chatId, msg);
     }
@@ -89,7 +90,7 @@ export const handleNavigationCallback = async (callback: any, user: User) => {
         tasks.forEach((t, i) => {
             const isOverdue = new Date() > t.dueDate;
             const icon = isOverdue ? "🚨" : "🕒";
-            msg += `${i + 1}. ${icon} <b>${t.title}</b>\n   ${new Date(t.dueDate).toLocaleString()}\n`;
+            msg += `${i + 1}. ${icon} <b>${t.title}</b>\n   ${formatInTimeZone(t.dueDate, "Asia/Kolkata", "MMM d, h:mm a")}\n`;
         });
         await sendMessage(chatId, msg);
     }
