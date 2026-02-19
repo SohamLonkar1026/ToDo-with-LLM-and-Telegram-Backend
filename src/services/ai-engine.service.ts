@@ -219,6 +219,60 @@ async function buildTaskContext(userId: string): Promise<string> {
     }
 }
 
+// ─── System Prompt Builder ──────────────────────────────────────────────────
+
+function buildSystemPrompt(currentTimeISO: string): string {
+    return `You are an AI Task Operations Assistant integrated into a Telegram-based task management system.
+
+ROLE:
+- Interpret user messages and call the appropriate tool to perform task operations.
+- Ask for clarification if the request is ambiguous.
+- Respond conversationally only when no task-related action is required.
+
+RULES:
+1. All time expressions are in Asia/Kolkata (IST) unless explicitly stated otherwise.
+2. Return dates in ISO 8601 format with timezone offset (+05:30 for IST).
+3. Only call a tool when intent is clear.
+4. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
+5. If confidence would be "low", ask a clarification question instead of calling a tool.
+6. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
+7. When rescheduling, match user's description to a task ID from context.
+
+Current Time: ${currentTimeISO}
+
+RESPONSE FORMAT:
+- Keep responses concise and clear.
+- Use Telegram-compatible HTML formatting: <b>bold</b>, <i>italic</i>, <code>code</code>.
+- Do not use Markdown formatting.`;
+}
+
+// ─── Normalize Tool Definitions for OpenAI ──────────────────────────────────
+
+function lowercaseTypes(obj: any): any {
+    if (Array.isArray(obj)) return obj.map(lowercaseTypes);
+    if (obj && typeof obj === "object") {
+        const out: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+            if (key === "type" && typeof value === "string") {
+                out[key] = value.toLowerCase();
+            } else {
+                out[key] = lowercaseTypes(value);
+            }
+        }
+        return out;
+    }
+    return obj;
+}
+
+const openAITools = TOOL_DEFINITIONS.map((tool) => ({
+    type: "function" as const,
+    function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: lowercaseTypes(tool.parameters),
+    },
+}));
+
 // ─── Main Processor ──────────────────────────────────────────────────────────
 
 export async function processMessage(chatId: string, userText: string): Promise<void> {
@@ -229,29 +283,168 @@ export async function processMessage(chatId: string, userText: string): Promise<
             return;
         }
 
-        // ──────────────────────────────────────────────────────────
-        // 🔧 AI ENGINE DISABLED — Gemini removed, awaiting OpenAI
-        // ──────────────────────────────────────────────────────────
-        console.log(`[AI_ENGINE] Message received from chatId ${chatId}: "${userText.substring(0, 100)}" — AI DISABLED`);
+        // 1. Look up user
+        const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
+        if (!user) {
+            await sendMessage(chatId, "❌ Please link your account first.\nType <code>/link &lt;code&gt;</code>.");
+            return;
+        }
 
-        await sendMessage(
-            chatId,
-            "🔧 AI engine temporarily disabled for migration. Slash commands still work!\n\nUse /menu to manage tasks."
-        );
+        // 2. Build context
+        const currentTimeISO = formatInTimeZone(new Date(), "Asia/Kolkata", "yyyy-MM-dd'T'HH:mm:ssXXX");
+        const systemPrompt = buildSystemPrompt(currentTimeISO);
+        const taskContext = await buildTaskContext(user.id);
 
-        return;
+        // 3. Call OpenAI
+        console.log(`[AI_ENGINE] Processing message from chatId ${chatId}: "${userText.substring(0, 100)}"`);
 
-        // NOTE: When OpenAI is integrated, the flow below will be restored:
-        // 1. Look up user by chatId
-        // 2. Build task context
-        // 3. Send to LLM with tool definitions
-        // 4. Validate function call output with validateToolCall()
-        // 5. Execute tool via executeTool()
-        // 6. Feed result back to LLM for natural language response
-        // 7. Send final message to user
+        let response;
+        try {
+            response = await openai.chat.completions.create({
+                model: "gpt-4o",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: `${taskContext}\n\nUser message: "${userText}"`,
+                    },
+                ],
+                tools: openAITools,
+                tool_choice: "auto",
+                temperature: 0.2,
+            });
+        } catch (aiError) {
+            console.error("[AI_ENGINE] OpenAI API error:", aiError);
+            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
+
+        const message = response.choices[0]?.message;
+        if (!message) {
+            console.error("[AI_ENGINE] No message in OpenAI response");
+            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
+
+        // 4. No tool call — conversational response
+        if (!message.tool_calls || message.tool_calls.length === 0) {
+            const textResponse = message.content || "I'm not sure how to help with that. Try describing a task to create.";
+            await sendMessage(chatId, textResponse);
+            return;
+        }
+
+        // 5. Extract tool call
+        const toolCall = message.tool_calls[0];
+
+        if (toolCall.type !== "function") {
+            console.warn(`[AI_ENGINE] Unsupported tool call type: ${toolCall.type}`);
+            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
+
+        const toolName = toolCall.function.name;
+        let args: any;
+
+        try {
+            args = JSON.parse(toolCall.function.arguments);
+        } catch (parseError) {
+            console.error("[AI_ENGINE] Failed to parse tool arguments:", toolCall.function.arguments);
+            await sendMessage(chatId, "I couldn't safely process that request. Please try again.");
+            return;
+        }
+
+        console.log(`[AI_ENGINE] Function call: ${toolName}`, JSON.stringify(args));
+
+        // 6. Defensive validation
+        const confidence = args.confidence || "low";
+        const validation = validateToolCall(toolName, args, confidence);
+
+        if (!validation.valid) {
+            console.warn(`[AI_ENGINE] Validation failed: ${validation.reason}`);
+            await sendMessage(chatId, "I couldn't safely process that request. Please try again.");
+            return;
+        }
+
+        // 7. Confidence gating
+        if (confidence === "low") {
+            // Low confidence — do NOT execute, ask for clarification
+            try {
+                const clarification = await openai.chat.completions.create({
+                    model: "gpt-4o",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userText },
+                        {
+                            role: "assistant",
+                            content: "I'm not confident enough to proceed. Let me ask for clarification.",
+                        },
+                        {
+                            role: "user",
+                            content: "Generate a short, friendly clarification question for the user.",
+                        },
+                    ],
+                    temperature: 0.3,
+                });
+                const question = clarification.choices[0]?.message?.content || "Could you please clarify what you'd like to do?";
+                await sendMessage(chatId, question);
+            } catch {
+                await sendMessage(chatId, "Could you please clarify what you'd like to do?");
+            }
+            return;
+        }
+
+        // 8. Execute tool
+        const result = await executeTool(toolName, user.id, args);
+
+        // 9. Feed result back to OpenAI for natural language response
+        const transparencyPrefix = confidence === "medium"
+            ? "Prepend your response with what assumption you made (e.g., 'Assuming you meant...'). Then confirm the action.\n\n"
+            : "";
+
+        try {
+            const followUp = await openai.chat.completions.create({
+                model: "gpt-4o",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userText },
+                    {
+                        role: "assistant",
+                        content: null,
+                        tool_calls: [
+                            {
+                                id: toolCall.id,
+                                type: "function",
+                                function: {
+                                    name: toolName,
+                                    arguments: toolCall.function.arguments,
+                                },
+                            },
+                        ],
+                    },
+                    {
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        content: JSON.stringify(result),
+                    },
+                    {
+                        role: "user",
+                        content: `${transparencyPrefix}Now respond to the user confirming what happened. Keep it concise. Use Telegram-compatible HTML.`,
+                    },
+                ],
+                temperature: 0.3,
+            });
+
+            const finalText = followUp.choices[0]?.message?.content || result.message;
+            await sendMessage(chatId, finalText);
+        } catch (followUpError) {
+            // If follow-up fails, send raw tool result
+            console.error("[AI_ENGINE] Follow-up call failed:", followUpError);
+            await sendMessage(chatId, result.message);
+        }
 
     } catch (error) {
         console.error("[AI_ENGINE] Unexpected error:", error);
         await sendMessage(chatId, "I couldn't process that request. Please try again.");
     }
 }
+
