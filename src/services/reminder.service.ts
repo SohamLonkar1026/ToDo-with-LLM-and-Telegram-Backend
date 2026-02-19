@@ -61,6 +61,7 @@ export const checkAndTriggerReminders = async () => {
 
                 // Snooze Expired? Trigger Snooze Wakeup
                 if (task.snoozedUntil <= currentTime) {
+                    console.log(`[BRANCH] SNOOZE_WAKEUP | TaskID: ${task.id} | snoozedUntil: ${task.snoozedUntil.toISOString()}`);
                     notificationType = currentTime > task.dueDate ? NotificationType.OVERDUE : NotificationType.REMINDER;
                     const prefix = notificationType === NotificationType.OVERDUE ? "Snoozed Overdue" : "Snoozed Reminder";
                     message = `${prefix}: Task "${task.title}" is ready!`;
@@ -99,6 +100,7 @@ export const checkAndTriggerReminders = async () => {
                         // Check if already sent
                         if (!sentStages.includes(stage.key)) {
                             // TRIGGER!
+                            console.log(`[BRANCH] STAGE | TaskID: ${task.id} | Stage: ${stage.key} | timeDiff: ${timeDiff}ms`);
                             notificationType = NotificationType.REMINDER;
                             message = `Reminder: Task "${task.title}" is due in ${stage.key}`;
                             stageKeyToAppend = stage.key;
@@ -123,6 +125,7 @@ export const checkAndTriggerReminders = async () => {
                 const remindedBeforeDue = task.lastReminderSentAt && task.lastReminderSentAt < task.dueDate;
 
                 if (neverReminded || remindedBeforeDue) {
+                    console.log(`[BRANCH] OVERDUE | TaskID: ${task.id} | neverReminded: ${neverReminded} | remindedBeforeDue: ${remindedBeforeDue} | lastReminderSentAt: ${task.lastReminderSentAt?.toISOString() ?? 'null'} | dueDate: ${task.dueDate.toISOString()}`);
                     notificationType = NotificationType.OVERDUE;
                     message = `Overdue: Task "${task.title}" is overdue!`;
                     updateData = { lastReminderSentAt: currentTime };
@@ -134,6 +137,7 @@ export const checkAndTriggerReminders = async () => {
             // TRANSACTION ALREADY
             // ------------------------------------------------------------------
             if (notificationType && message) {
+                console.log(`[SEND START] TaskID: ${task.id} | Type: ${notificationType} | Time: ${currentTime.toISOString()}`);
                 try {
                     await prisma.$transaction([
                         prisma.task.update({ where: { id: task.id }, data: updateData }),
@@ -157,13 +161,18 @@ export const checkAndTriggerReminders = async () => {
 
                         if (user && user.telegramChatId) {
                             await telegramService.sendReminderNotification(task, user as any);
+                            console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: SENT`);
+                        } else {
+                            console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: SKIPPED (no chatId)`);
                         }
                     } catch (err) {
                         console.error("[REMINDER_ENGINE] [TELEGRAM_FAIL]", err);
+                        console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: FAILED`);
                     }
 
                 } catch (txError) {
                     console.error(`[REMINDER_ENGINE] [TX_FAIL] Task ${task.id}`, txError);
+                    console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | TX: FAILED (no Telegram sent)`);
                 }
             }
         }

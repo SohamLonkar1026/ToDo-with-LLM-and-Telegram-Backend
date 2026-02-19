@@ -1,4 +1,5 @@
 console.log("🚀 IST DEPLOY CHECK");
+console.log("JWT_SECRET:", process.env.JWT_SECRET);
 
 import app from "./app";
 import env from "./config/env";
@@ -28,6 +29,7 @@ async function startServer() {
 
         // 3. Start Server
         const server = app.listen(PORT, "0.0.0.0", () => {
+            console.log(`[BOOT] Server started | PID: ${process.pid}`);
             console.log(`🚀 AI-MOM API running on http://localhost:${PORT}`);
             console.log(`📋 Environment: ${env.NODE_ENV}`);
         });
