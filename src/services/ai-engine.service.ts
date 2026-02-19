@@ -41,6 +41,33 @@ function isRateLimited(chatId: string): boolean {
     return false;
 }
 
+// ─── Pending Clarifications (In-Memory) ──────────────────────────────────────
+
+const CLARIFICATION_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes
+
+const pendingClarifications = new Map<
+    string,
+    {
+        toolName: string;
+        args: any;
+        userId: string;
+        createdAt: number;
+    }
+>();
+
+function buildHumanReadableAction(toolName: string, args: any): string {
+    switch (toolName) {
+        case "create_task":
+            return `create a task titled \"${args.title}\"${args.due_date ? " with the specified due date" : ""}`;
+        case "reschedule_task":
+            return `reschedule task to the new date`;
+        case "get_tasks":
+            return `show your tasks`;
+        default:
+            return `perform this action`;
+    }
+}
+
 // ─── Tool Definitions (Data Only — No SDK Types) ────────────────────────────
 
 // These definitions describe the available tools for function-calling.
@@ -277,7 +304,62 @@ const openAITools = TOOL_DEFINITIONS.map((tool) => ({
 
 export async function processMessage(chatId: string, userText: string): Promise<void> {
     try {
-        // 0. Rate limiting
+        // 0. Check for pending clarification (yes/no response)
+        const pending = pendingClarifications.get(chatId);
+        if (pending) {
+            // Expire stale clarifications
+            if (Date.now() - pending.createdAt > CLARIFICATION_EXPIRY_MS) {
+                pendingClarifications.delete(chatId);
+            } else {
+                const text = userText.toLowerCase().trim();
+                const YES_WORDS = ["yes", "ya", "haan", "ok", "sure", "yep", "yeah", "y"];
+                const NO_WORDS = ["no", "cancel", "nahi", "nope", "n"];
+
+                if (YES_WORDS.includes(text)) {
+                    const result = await executeTool(pending.toolName, pending.userId, pending.args);
+                    pendingClarifications.delete(chatId);
+
+                    if (!result.success) {
+                        await sendMessage(chatId, `❌ ${result.message}`);
+                        return;
+                    }
+
+                    switch (pending.toolName) {
+                        case "create_task":
+                            await sendMessage(
+                                chatId,
+                                `✅ <b>Task Created</b>\n\n` +
+                                `📌 Title: ${result.data?.title || pending.args.title}\n` +
+                                `🗓 Due: ${result.data?.dueDateFormatted || "N/A"}\n` +
+                                `⚡ Priority: ${result.data?.priority || "MEDIUM"}`
+                            );
+                            break;
+                        case "reschedule_task":
+                            await sendMessage(
+                                chatId,
+                                `🔄 <b>Task Rescheduled</b>\n\n` +
+                                `📌 ${result.data?.title || "Task"}\n` +
+                                `🗓 New Due: ${result.data?.dueDateFormatted || "N/A"}`
+                            );
+                            break;
+                        default:
+                            await sendMessage(chatId, result.message);
+                    }
+                    return;
+                }
+
+                if (NO_WORDS.includes(text)) {
+                    pendingClarifications.delete(chatId);
+                    await sendMessage(chatId, "❌ Cancelled.");
+                    return;
+                }
+
+                // Not yes/no — clear pending and process as new message
+                pendingClarifications.delete(chatId);
+            }
+        }
+
+        // 0b. Rate limiting
         if (isRateLimited(chatId)) {
             await sendMessage(chatId, "⏳ Please wait a moment before sending another request.");
             return;
@@ -368,28 +450,24 @@ export async function processMessage(chatId: string, userText: string): Promise<
         // 7. Confidence gating
         if (confidence === "low") {
             // Low confidence — do NOT execute, ask for clarification
-            try {
-                const clarification = await openai.chat.completions.create({
-                    model: "gpt-4.1",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: userText },
-                        {
-                            role: "assistant",
-                            content: "I'm not confident enough to proceed. Let me ask for clarification.",
-                        },
-                        {
-                            role: "user",
-                            content: "Generate a short, friendly clarification question for the user.",
-                        },
-                    ],
-                    temperature: 0.3,
-                });
-                const question = clarification.choices[0]?.message?.content || "Could you please clarify what you'd like to do?";
-                await sendMessage(chatId, question);
-            } catch {
-                await sendMessage(chatId, "Could you please clarify what you'd like to do?");
-            }
+            await sendMessage(chatId, "Could you please clarify what you'd like to do? Try being more specific with the task and time.");
+            return;
+        }
+
+        if (confidence === "medium") {
+            // Medium confidence — store pending, ask for confirmation
+            const action = buildHumanReadableAction(toolName, args);
+            pendingClarifications.set(chatId, {
+                toolName,
+                args,
+                userId: user.id,
+                createdAt: Date.now(),
+            });
+
+            await sendMessage(
+                chatId,
+                `🤔 Just to confirm — should I <b>${action}</b>?\n\nReply <b>Yes</b> or <b>No</b>.`
+            );
             return;
         }
 
