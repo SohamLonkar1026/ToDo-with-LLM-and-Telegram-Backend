@@ -1,78 +1,16 @@
 import { formatInTimeZone } from "date-fns-tz";
-import env from "../config/env";
 import prisma from "../utils/prisma";
 import * as conversationService from "./conversation.service";
 import * as navigationService from "./telegram.navigation";
 import { sendMessage } from "./telegram.service";
 import { Priority } from "@prisma/client";
 import { parseTelegramDate } from "../utils/telegramDateParser";
+import * as linkService from "./telegram.link.service";
 
 const BASE_URL = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
-let lastUpdateId = 0;
-let pollingInterval: NodeJS.Timeout | null = null;
-let isPolling = false;
-
-export const initializeTelegramPoller = () => {
-    console.log("[TELEGRAM] Polling disabled for webhook migration.");
-    // if (!process.env.TELEGRAM_BOT_TOKEN) {
-    //     console.warn("[TELEGRAM] Bot token missing. Poller disabled.");
-    //     return;
-    // }
-
-    // if (pollingInterval) {
-    //     console.warn("[TELEGRAM] Poller already running.");
-    //     return;
-    // }
-
-    //Start polling loop
-    // console.log("[BOOT] Telegram poller initialized");
-    // pollingInterval = setInterval(poll, 3000);
-};
-
-const poll = async () => {
-    // Polling logic disabled
-    if (isPolling) return;
-
-    // isPolling = true;
-
-    // try {
-    //     const offset = lastUpdateId + 1;
-    //     const response = await fetch(`${BASE_URL}/getUpdates?offset=${offset}&timeout=1`);
-
-    //     if (!response.ok) {
-    //         if (process.env.NODE_ENV !== 'production') console.warn(`[TELEGRAM] Poll failed: ${response.statusText}`);
-    //         isPolling = false;
-    //         return;
-    //     }
-
-    //     const data = await response.json() as any;
-
-    //     if (data.ok && data.result.length > 0) {
-    //         for (const update of data.result) {
-    //             if (update.update_id > lastUpdateId) {
-    //                 lastUpdateId = update.update_id;
-    //             }
-
-    //             if (update.callback_query) {
-    //                 await handleCallbackQuery(update.callback_query);
-    //             } else if (update.message) {
-    //                 await handleMessage(update.message);
-    //             }
-    //         }
-    //     }
-    // } catch (error) {
-    //     console.error("[TELEGRAM] Polling error:", error);
-    // } finally {
-    //     isPolling = false;
-    // }
-};
-
-import * as linkService from "./telegram.link.service";
-
 // Exported for Webhook Controller
 export const handleMessage = async (message: any) => {
-    console.log("🚨 TELEGRAM HANDLER FILE ACTIVE");
     try {
         const text = message.text;
         const chatId = message.chat.id.toString();
@@ -111,7 +49,6 @@ export const handleMessage = async (message: any) => {
         }
 
         // 3. SECURITY GUARD - Reject unlinked users
-        // This is the gatekeeper. No logic below this line runs for unlinked users.
         const user = await prisma.user.findFirst({
             where: { telegramChatId: chatId }
         });
@@ -146,9 +83,6 @@ export const handleMessage = async (message: any) => {
 
             const dueDate = parsedDateResult.date;
 
-            // Clean up the title: remove "/add" and the date text
-            // remainingText from parser already removed the date text
-            // We just need to remove "/add" from it
             let title = parsedDateResult.remainingText.replace("/add", "").trim();
             title = title.replace(/\s+/g, " ").trim();
 
@@ -313,13 +247,5 @@ export const handleCallbackQuery = async (callback: any) => {
 
     } catch (error) {
         console.error("[TELEGRAM] Error handling callback:", error);
-    }
-};
-
-export const stopTelegramPoller = () => {
-    if (pollingInterval) {
-        clearInterval(pollingInterval);
-        pollingInterval = null;
-        console.log("[SHUTDOWN] Telegram poller stopped");
     }
 };

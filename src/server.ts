@@ -1,11 +1,9 @@
 console.log("🚀 IST DEPLOY CHECK");
-console.log("JWT_SECRET:", process.env.JWT_SECRET);
 
 import app from "./app";
 import env from "./config/env";
 import prisma from "./utils/prisma";
 import { startReminderJob } from "./jobs/reminder.job";
-import { initializeTelegramPoller, stopTelegramPoller } from "./services/telegram.poller";
 import systemRoutes from "./routes/system.routes";
 
 // Monitoring Routes
@@ -37,13 +35,9 @@ async function startServer() {
         // Hardening: Prevent hanging connections
         server.setTimeout(30000);
 
-        // 4. Initialize Telegram Poller
-        // initializeTelegramPoller();
-
         // Graceful Shutdown
         process.on('SIGTERM', async () => {
             console.log('[SHUTDOWN] Closing server...');
-            // stopTelegramPoller();
             server.close(async () => {
                 await prisma.$disconnect();
                 console.log('[SHUTDOWN] Server closed');
