@@ -396,50 +396,39 @@ export async function processMessage(chatId: string, userText: string): Promise<
         // 8. Execute tool
         const result = await executeTool(toolName, user.id, args);
 
-        // 9. Feed result back to OpenAI for natural language response
-        const transparencyPrefix = confidence === "medium"
-            ? "Prepend your response with what assumption you made (e.g., 'Assuming you meant...'). Then confirm the action.\n\n"
-            : "";
+        // 9. Deterministic confirmation — no second AI call
+        if (!result.success) {
+            await sendMessage(chatId, `❌ ${result.message}`);
+            return;
+        }
 
-        try {
-            const followUp = await openai.chat.completions.create({
-                model: "gpt-4.1",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userText },
-                    {
-                        role: "assistant",
-                        content: null,
-                        tool_calls: [
-                            {
-                                id: toolCall.id,
-                                type: "function",
-                                function: {
-                                    name: toolName,
-                                    arguments: toolCall.function.arguments,
-                                },
-                            },
-                        ],
-                    },
-                    {
-                        role: "tool",
-                        tool_call_id: toolCall.id,
-                        content: JSON.stringify(result),
-                    },
-                    {
-                        role: "user",
-                        content: `${transparencyPrefix}Now respond to the user confirming what happened. Keep it concise. Use Telegram-compatible HTML.`,
-                    },
-                ],
-                temperature: 0.3,
-            });
+        switch (toolName) {
+            case "create_task":
+                await sendMessage(
+                    chatId,
+                    `✅ <b>Task Created</b>\n\n` +
+                    `📌 Title: ${result.data?.title || args.title}\n` +
+                    `🗓 Due: ${result.data?.dueDateFormatted || "N/A"}\n` +
+                    `⚡ Priority: ${result.data?.priority || "MEDIUM"}`
+                );
+                break;
 
-            const finalText = followUp.choices[0]?.message?.content || result.message;
-            await sendMessage(chatId, finalText);
-        } catch (followUpError) {
-            // If follow-up fails, send raw tool result
-            console.error("[AI_ENGINE] Follow-up call failed:", followUpError);
-            await sendMessage(chatId, result.message);
+            case "reschedule_task":
+                await sendMessage(
+                    chatId,
+                    `🔄 <b>Task Rescheduled</b>\n\n` +
+                    `📌 ${result.data?.title || "Task"}\n` +
+                    `🗓 New Due: ${result.data?.dueDateFormatted || "N/A"}`
+                );
+                break;
+
+            case "get_tasks":
+                // get_tasks already returns fully formatted HTML in result.message
+                await sendMessage(chatId, result.message);
+                break;
+
+            default:
+                await sendMessage(chatId, result.message);
         }
 
     } catch (error) {

@@ -118,7 +118,7 @@ async function executeCreateTask(userId: string, args: any): Promise<ToolResult>
         return {
             success: true,
             message: `Task "${task.title}" created successfully.\nDue: ${dueDateIST}\nPriority: ${priority}`,
-            data: { taskId: task.id, title: task.title, dueDate: task.dueDate }
+            data: { taskId: task.id, title: task.title, dueDate: task.dueDate, dueDateFormatted: dueDateIST, priority: priority }
         };
     } catch (error) {
         console.error("[TOOL_EXECUTOR] create_task failed:", error);
@@ -160,7 +160,7 @@ async function executeRescheduleTask(userId: string, args: any): Promise<ToolRes
         return {
             success: true,
             message: `Task "${task.title}" rescheduled to ${newDateIST}.`,
-            data: { taskId: updatedTask.id, title: updatedTask.title, newDueDate: updatedTask.dueDate }
+            data: { taskId: updatedTask.id, title: updatedTask.title, newDueDate: updatedTask.dueDate, dueDateFormatted: newDateIST }
         };
     } catch (error: any) {
         if (error?.status === 404) {
