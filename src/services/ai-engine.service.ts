@@ -41,6 +41,27 @@ function isRateLimited(chatId: string): boolean {
     return false;
 }
 
+// ─── Conversation History (In-Memory) ────────────────────────────────────────
+
+const MAX_HISTORY = 10; // last N messages per chat
+const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
+
+function addToHistory(chatId: string, role: "user" | "assistant", content: string): void {
+    if (!conversationHistory.has(chatId)) {
+        conversationHistory.set(chatId, []);
+    }
+    const history = conversationHistory.get(chatId)!;
+    history.push({ role, content });
+    // Keep only last N messages
+    if (history.length > MAX_HISTORY) {
+        history.splice(0, history.length - MAX_HISTORY);
+    }
+}
+
+function getHistory(chatId: string): Array<{ role: "user" | "assistant"; content: string }> {
+    return conversationHistory.get(chatId) || [];
+}
+
 // ─── Pending Clarifications (In-Memory) ──────────────────────────────────────
 
 const CLARIFICATION_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes
@@ -59,6 +80,8 @@ function buildHumanReadableAction(toolName: string, args: any): string {
     switch (toolName) {
         case "create_task":
             return `create a task titled \"${args.title}\"${args.due_date ? " with the specified due date" : ""}`;
+        case "complete_task":
+            return `mark the task as completed`;
         case "reschedule_task":
             return `reschedule task to the new date`;
         case "get_tasks":
@@ -160,22 +183,44 @@ const TOOL_DEFINITIONS = [
             required: ["confidence"],
         },
     },
+    {
+        name: "complete_task",
+        description:
+            "Mark an existing task as completed/done. Call when the user says they finished, completed, or did a task.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                task_id: {
+                    type: "STRING",
+                    description: "The ID of the task to mark as completed. Match from the task context.",
+                },
+                confidence: {
+                    type: "STRING",
+                    description: "Confidence in interpretation.",
+                    enum: ["high", "medium", "low"],
+                },
+            },
+            required: ["task_id", "confidence"],
+        },
+    },
 ];
 
 // ─── Defensive Tool Call Validator ───────────────────────────────────────────
 
-const ALLOWED_TOOLS = new Set(["create_task", "reschedule_task", "get_tasks"]);
+const ALLOWED_TOOLS = new Set(["create_task", "reschedule_task", "get_tasks", "complete_task"]);
 
 const REQUIRED_FIELDS: Record<string, string[]> = {
     create_task: ["title", "due_date", "confidence"],
     reschedule_task: ["task_id", "new_due_date", "confidence"],
     get_tasks: ["confidence"],
+    complete_task: ["task_id", "confidence"],
 };
 
 const ALLOWED_FIELDS: Record<string, string[]> = {
     create_task: ["title", "due_date", "confidence", "description", "priority", "estimated_minutes"],
     reschedule_task: ["task_id", "new_due_date", "confidence"],
     get_tasks: ["status", "confidence"],
+    complete_task: ["task_id", "confidence"],
 };
 
 function validateToolCall(
@@ -302,6 +347,17 @@ const openAITools = TOOL_DEFINITIONS.map((tool) => ({
 
 // ─── Main Processor ──────────────────────────────────────────────────────────
 
+// ─── Main Processor ──────────────────────────────────────────────────────────
+
+async function sendAndTrackMessage(chatId: string, text: string) {
+    addToHistory(chatId, "assistant", text);
+    try {
+        await sendMessage(chatId, text);
+    } catch (error) {
+        console.error(`[AI_ENGINE] Failed to send message to ${chatId}:`, error);
+    }
+}
+
 export async function processMessage(chatId: string, userText: string): Promise<void> {
     try {
         // 0. Check for pending clarification (yes/no response)
@@ -311,6 +367,9 @@ export async function processMessage(chatId: string, userText: string): Promise<
             if (Date.now() - pending.createdAt > CLARIFICATION_EXPIRY_MS) {
                 pendingClarifications.delete(chatId);
             } else {
+                // Add user response to history
+                addToHistory(chatId, "user", userText);
+
                 const text = userText.toLowerCase().trim();
                 const YES_WORDS = ["yes", "ya", "haan", "ok", "sure", "yep", "yeah", "y"];
                 const NO_WORDS = ["no", "cancel", "nahi", "nope", "n"];
@@ -320,13 +379,13 @@ export async function processMessage(chatId: string, userText: string): Promise<
                     pendingClarifications.delete(chatId);
 
                     if (!result.success) {
-                        await sendMessage(chatId, `❌ ${result.message}`);
+                        await sendAndTrackMessage(chatId, `❌ ${result.message}`);
                         return;
                     }
 
                     switch (pending.toolName) {
                         case "create_task":
-                            await sendMessage(
+                            await sendAndTrackMessage(
                                 chatId,
                                 `✅ <b>Task Created</b>\n\n` +
                                 `📌 Title: ${result.data?.title || pending.args.title}\n` +
@@ -335,22 +394,29 @@ export async function processMessage(chatId: string, userText: string): Promise<
                             );
                             break;
                         case "reschedule_task":
-                            await sendMessage(
+                            await sendAndTrackMessage(
                                 chatId,
                                 `🔄 <b>Task Rescheduled</b>\n\n` +
                                 `📌 ${result.data?.title || "Task"}\n` +
                                 `🗓 New Due: ${result.data?.dueDateFormatted || "N/A"}`
                             );
                             break;
+                        case "complete_task":
+                            await sendAndTrackMessage(
+                                chatId,
+                                `✅ <b>Task Completed</b>\n\n` +
+                                `📌 "${result.data?.title || "Task"}" marked as done.`
+                            );
+                            break;
                         default:
-                            await sendMessage(chatId, result.message);
+                            await sendAndTrackMessage(chatId, result.message);
                     }
                     return;
                 }
 
                 if (NO_WORDS.includes(text)) {
                     pendingClarifications.delete(chatId);
-                    await sendMessage(chatId, "❌ Cancelled.");
+                    await sendAndTrackMessage(chatId, "❌ Cancelled.");
                     return;
                 }
 
@@ -372,10 +438,13 @@ export async function processMessage(chatId: string, userText: string): Promise<
             return;
         }
 
-        // 2. Build context
+        // 2. Add to history & Build context
+        addToHistory(chatId, "user", userText);
+
         const currentTimeISO = formatInTimeZone(new Date(), "Asia/Kolkata", "yyyy-MM-dd'T'HH:mm:ssXXX");
         const systemPrompt = buildSystemPrompt(currentTimeISO);
         const taskContext = await buildTaskContext(user.id);
+        const history = getHistory(chatId);
 
         // 3. Call OpenAI
         console.log(`[AI_ENGINE] Processing message from chatId ${chatId}: "${userText.substring(0, 100)}"`);
@@ -388,8 +457,9 @@ export async function processMessage(chatId: string, userText: string): Promise<
                     { role: "system", content: systemPrompt },
                     {
                         role: "user",
-                        content: `${taskContext}\n\nUser message: "${userText}"`,
+                        content: `Current Task Context:\n${taskContext}`,
                     },
+                    ...history, // Inject conversation history
                 ],
                 tools: openAITools,
                 tool_choice: "auto",
@@ -397,21 +467,21 @@ export async function processMessage(chatId: string, userText: string): Promise<
             });
         } catch (aiError) {
             console.error("[AI_ENGINE] OpenAI API error:", aiError);
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
             return;
         }
 
         const message = response.choices[0]?.message;
         if (!message) {
             console.error("[AI_ENGINE] No message in OpenAI response");
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
             return;
         }
 
         // 4. No tool call — conversational response
         if (!message.tool_calls || message.tool_calls.length === 0) {
             const textResponse = message.content || "I'm not sure how to help with that. Try describing a task to create.";
-            await sendMessage(chatId, textResponse);
+            await sendAndTrackMessage(chatId, textResponse);
             return;
         }
 
@@ -420,7 +490,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
 
         if (toolCall.type !== "function") {
             console.warn(`[AI_ENGINE] Unsupported tool call type: ${toolCall.type}`);
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
             return;
         }
 
@@ -431,7 +501,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
             args = JSON.parse(toolCall.function.arguments);
         } catch (parseError) {
             console.error("[AI_ENGINE] Failed to parse tool arguments:", toolCall.function.arguments);
-            await sendMessage(chatId, "I couldn't safely process that request. Please try again.");
+            await sendAndTrackMessage(chatId, "I couldn't safely process that request. Please try again.");
             return;
         }
 
@@ -443,14 +513,14 @@ export async function processMessage(chatId: string, userText: string): Promise<
 
         if (!validation.valid) {
             console.warn(`[AI_ENGINE] Validation failed: ${validation.reason}`);
-            await sendMessage(chatId, "I couldn't safely process that request. Please try again.");
+            await sendAndTrackMessage(chatId, "I couldn't safely process that request. Please try again.");
             return;
         }
 
         // 7. Confidence gating
         if (confidence === "low") {
             // Low confidence — do NOT execute, ask for clarification
-            await sendMessage(chatId, "Could you please clarify what you'd like to do? Try being more specific with the task and time.");
+            await sendAndTrackMessage(chatId, "Could you please clarify what you'd like to do? Try being more specific with the task and time.");
             return;
         }
 
@@ -464,7 +534,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
                 createdAt: Date.now(),
             });
 
-            await sendMessage(
+            await sendAndTrackMessage(
                 chatId,
                 `🤔 Just to confirm — should I <b>${action}</b>?\n\nReply <b>Yes</b> or <b>No</b>.`
             );
@@ -476,13 +546,13 @@ export async function processMessage(chatId: string, userText: string): Promise<
 
         // 9. Deterministic confirmation — no second AI call
         if (!result.success) {
-            await sendMessage(chatId, `❌ ${result.message}`);
+            await sendAndTrackMessage(chatId, `❌ ${result.message}`);
             return;
         }
 
         switch (toolName) {
             case "create_task":
-                await sendMessage(
+                await sendAndTrackMessage(
                     chatId,
                     `✅ <b>Task Created</b>\n\n` +
                     `📌 Title: ${result.data?.title || args.title}\n` +
@@ -492,7 +562,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
                 break;
 
             case "reschedule_task":
-                await sendMessage(
+                await sendAndTrackMessage(
                     chatId,
                     `🔄 <b>Task Rescheduled</b>\n\n` +
                     `📌 ${result.data?.title || "Task"}\n` +
@@ -500,13 +570,21 @@ export async function processMessage(chatId: string, userText: string): Promise<
                 );
                 break;
 
+            case "complete_task":
+                await sendAndTrackMessage(
+                    chatId,
+                    `✅ <b>Task Completed</b>\n\n` +
+                    `📌 "${result.data?.title || "Task"}" marked as done.`
+                );
+                break;
+
             case "get_tasks":
                 // get_tasks already returns fully formatted HTML in result.message
-                await sendMessage(chatId, result.message);
+                await sendAndTrackMessage(chatId, result.message);
                 break;
 
             default:
-                await sendMessage(chatId, result.message);
+                await sendAndTrackMessage(chatId, result.message);
         }
 
     } catch (error) {

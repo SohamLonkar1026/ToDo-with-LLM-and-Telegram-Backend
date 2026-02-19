@@ -226,12 +226,41 @@ async function executeGetTasks(userId: string, args: any): Promise<ToolResult> {
     }
 }
 
+// ─── Complete Task Executor ──────────────────────────────────────────────────
+
+async function executeCompleteTask(userId: string, args: any): Promise<ToolResult> {
+    if (!args.task_id || typeof args.task_id !== "string") {
+        return { success: false, message: "Task ID is required." };
+    }
+
+    try {
+        const task = await taskService.getTaskById(userId, args.task_id);
+
+        await taskService.updateTask(userId, args.task_id, { status: "COMPLETED" });
+
+        console.log(`[TOOL_EXECUTOR_DB] complete_task — "${task.title}" marked COMPLETED`);
+
+        return {
+            success: true,
+            message: `Task "${task.title}" marked as completed.`,
+            data: { taskId: task.id, title: task.title },
+        };
+    } catch (error: any) {
+        if (error?.status === 404) {
+            return { success: false, message: "Task not found. Please check the task ID." };
+        }
+        console.error("[TOOL_EXECUTOR] complete_task failed:", error);
+        return { success: false, message: "Failed to complete task. Please try again." };
+    }
+}
+
 // ─── Public Executor ─────────────────────────────────────────────────────────
 
 const TOOL_MAP: Record<string, (userId: string, args: any) => Promise<ToolResult>> = {
     create_task: executeCreateTask,
     reschedule_task: executeRescheduleTask,
     get_tasks: executeGetTasks,
+    complete_task: executeCompleteTask,
 };
 
 export async function executeTool(toolName: string, userId: string, args: any): Promise<ToolResult> {
