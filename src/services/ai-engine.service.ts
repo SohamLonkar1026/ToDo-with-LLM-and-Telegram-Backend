@@ -2,6 +2,17 @@ import prisma from "../utils/prisma";
 import { sendMessage } from "./telegram.service";
 import { executeTool } from "./tool-executor.service";
 import { formatInTimeZone } from "date-fns-tz";
+import OpenAI from "openai";
+
+// ─── OpenAI Init ─────────────────────────────────────────────────────────────
+
+if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not defined in environment variables");
+}
+
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 // ─── Rate Limiter (In-Memory) ────────────────────────────────────────────────
 
