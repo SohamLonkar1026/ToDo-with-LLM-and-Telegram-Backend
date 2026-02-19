@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 async function main() {
     console.log("🔍 Checking Users in DB...");
     const users = await prisma.user.findMany({
-        select: { id: true, email: true, username: true }
+        select: { id: true, email: true }
     });
     console.table(users);
 }
