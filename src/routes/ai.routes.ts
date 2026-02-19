@@ -1,7 +1,29 @@
 import express from "express";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateGeminiResponse, parseTaskFromText } from "../services/gemini.service";
 
 const router = express.Router();
+
+// GET /api/ai/ai-direct-test — TEMPORARY: Isolate model behavior
+router.get("/ai-direct-test", async (req, res) => {
+    try {
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+        const model = genAI.getGenerativeModel({
+            model: "gemini-2.0-flash"
+        });
+
+        const result = await model.generateContent("Say hello.");
+        const text = result.response.text();
+
+        res.json({ success: true, text });
+    } catch (err: any) {
+        console.error("DIRECT AI ERROR:", err);
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
 
 // POST /api/ai/test
 router.post("/test", async (req, res) => {
