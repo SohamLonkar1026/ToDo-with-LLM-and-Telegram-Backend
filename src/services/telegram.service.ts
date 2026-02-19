@@ -24,11 +24,14 @@ export const sendMessage = async (chatId: string, text: string, inlineKeyboard?:
             body.reply_markup = inlineKeyboard;
         }
 
+        console.log("🔥 TELEGRAM FETCH EXECUTING", new Date().toISOString());
+        console.trace("FETCH STACK TRACE");
         const response = await fetch(`${BASE_URL}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
+        console.log("🔥 TELEGRAM FETCH COMPLETED", new Date().toISOString());
 
         const data = await response.json() as any;
 
