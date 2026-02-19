@@ -301,7 +301,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
         let response;
         try {
             response = await openai.chat.completions.create({
-                model: "gpt-4o",
+                model: "gpt-4.1",
                 messages: [
                     { role: "system", content: systemPrompt },
                     {
@@ -370,7 +370,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
             // Low confidence — do NOT execute, ask for clarification
             try {
                 const clarification = await openai.chat.completions.create({
-                    model: "gpt-4o",
+                    model: "gpt-4.1",
                     messages: [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userText },
@@ -403,7 +403,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
 
         try {
             const followUp = await openai.chat.completions.create({
-                model: "gpt-4o",
+                model: "gpt-4.1",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userText },
