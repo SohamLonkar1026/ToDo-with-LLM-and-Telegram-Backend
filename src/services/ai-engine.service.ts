@@ -276,7 +276,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
 
         // 3. Create model with tool-calling
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
+            model: "gemini-1.5-flash-latest",
             systemInstruction: systemPrompt,
             tools: [{ functionDeclarations: TOOL_DEFINITIONS }],
             toolConfig: {
