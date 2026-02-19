@@ -5,6 +5,25 @@ import env from "./config/env";
 import prisma from "./utils/prisma";
 import { startReminderJob } from "./jobs/reminder.job";
 import systemRoutes from "./routes/system.routes";
+import axios from "axios";
+
+// ─── TEMPORARY: Model Discovery (REMOVE AFTER IDENTIFYING CORRECT MODEL) ────
+async function listGeminiModels() {
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) { console.log("[MODEL_DISCOVERY] No GEMINI_API_KEY set"); return; }
+        const res = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        const models = res.data.models || [];
+        console.log(`[MODEL_DISCOVERY] Found ${models.length} models:`);
+        for (const m of models) {
+            const methods = m.supportedGenerationMethods?.join(", ") || "none";
+            console.log(`  - ${m.name} | methods: ${methods}`);
+        }
+    } catch (err: any) {
+        console.error("[MODEL_DISCOVERY] Failed:", err?.response?.data || err.message);
+    }
+}
+listGeminiModels();
 
 // Monitoring Routes
 app.use("/api/system", systemRoutes);
