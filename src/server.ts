@@ -12,12 +12,32 @@ async function listGeminiModels() {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) { console.log("[MODEL_DISCOVERY] No GEMINI_API_KEY set"); return; }
-        const res = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        const models = res.data.models || [];
-        console.log(`[MODEL_DISCOVERY] Found ${models.length} models:`);
-        for (const m of models) {
+
+        let allModels: any[] = [];
+        let pageToken = "";
+        let page = 0;
+
+        // Paginate through all models
+        do {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100${pageToken ? `&pageToken=${pageToken}` : ""}`;
+            const res = await axios.get(url);
+            const models = res.data.models || [];
+            allModels = allModels.concat(models);
+            pageToken = res.data.nextPageToken || "";
+            page++;
+        } while (pageToken);
+
+        console.log(`[MODEL_DISCOVERY] Total models found: ${allModels.length} (${page} pages)`);
+
+        // Filter and show only models supporting generateContent
+        const gcModels = allModels.filter((m: any) =>
+            m.supportedGenerationMethods?.includes("generateContent")
+        );
+
+        console.log(`[MODEL_DISCOVERY] Models supporting generateContent (${gcModels.length}):`);
+        for (const m of gcModels) {
             const methods = m.supportedGenerationMethods?.join(", ") || "none";
-            console.log(`  - ${m.name} | methods: ${methods}`);
+            console.log(`  ✅ ${m.name} | methods: ${methods}`);
         }
     } catch (err: any) {
         console.error("[MODEL_DISCOVERY] Failed:", err?.response?.data || err.message);
