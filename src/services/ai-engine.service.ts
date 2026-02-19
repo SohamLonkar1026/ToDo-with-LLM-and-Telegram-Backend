@@ -126,7 +126,7 @@ const TOOL_DEFINITIONS = [
                 },
                 priority: {
                     type: "STRING",
-                    description: "Task priority level.",
+                    description: "Task priority. RULES: 'HIGH' if user says 'urgent', 'critical', 'emergency', or due within 24h. 'LOW' for small tasks like 'buy milk', 'gym'. Default to 'MEDIUM'.",
                     enum: ["LOW", "MEDIUM", "HIGH", "URGENT"],
                 },
                 estimated_minutes: {
@@ -165,7 +165,7 @@ const TOOL_DEFINITIONS = [
     {
         name: "get_tasks",
         description:
-            "Get the user's tasks. Call when the user wants to see, list, or check their tasks.",
+            "Get the user's tasks. Call when the user wants to see, list, or check their tasks. Returns tasks sorted by Priority (High->Low) then Date.",
         parameters: {
             type: "OBJECT",
             properties: {
@@ -306,10 +306,14 @@ RULES:
 1. All time expressions are in Asia/Kolkata (IST) unless explicitly stated otherwise.
 2. Return dates in ISO 8601 format with timezone offset (+05:30 for IST).
 3. Only call a tool when intent is clear.
-4. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
-5. If confidence would be "low", ask a clarification question instead of calling a tool.
-6. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
-7. When rescheduling, match user's description to a task ID from context.
+4. **PRIORITY RULES**:
+   - Set **HIGH** if: user says "urgent", "critical", "emergency", "must do", OR due date is within 24 hours.
+   - Set **LOW** if: small/routine tasks like "buy milk", "go to gym", "call mom".
+   - Set **MEDIUM** (default) if no specific urgency mentioned.
+5. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
+6. If confidence would be "low", ask a clarification question instead of calling a tool.
+7. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
+8. When rescheduling, match user's description to a task ID from context.
 
 EXAMPLES:
 - User: "Remind me to go meet Utkarsh tomorrow regarding the form"

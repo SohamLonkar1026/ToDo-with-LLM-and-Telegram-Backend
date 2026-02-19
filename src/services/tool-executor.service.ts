@@ -199,6 +199,16 @@ async function executeGetTasks(userId: string, args: any): Promise<ToolResult> {
             tasks = tasks.filter(t => t.title.toLowerCase().includes(kw));
         }
 
+        // Sort by Priority (HIGH > MEDIUM > LOW) then Due Date (Ascending)
+        const priorityWeight: Record<string, number> = { "URGENT": 3, "HIGH": 3, "MEDIUM": 2, "LOW": 1 };
+
+        tasks.sort((a, b) => {
+            const pA = priorityWeight[a.priority] || 0;
+            const pB = priorityWeight[b.priority] || 0;
+            if (pA !== pB) return pB - pA; // Higher priority first
+            return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(); // Sooner due date first
+        });
+
         if (tasks.length === 0) {
             return { success: true, message: "No pending tasks found matching your criteria." };
         }
