@@ -100,14 +100,14 @@ const TOOL_DEFINITIONS = [
     {
         name: "create_task",
         description:
-            "Create a new task for the user. Call this when the user clearly wants to add a new task, reminder, or to-do item.",
+            "Create a new task. IMPORTANT: Extract a very short, concise title (3-5 words). Put all additional context/details into the description field.",
         parameters: {
             type: "OBJECT",
             properties: {
                 title: {
                     type: "STRING",
                     description:
-                        "The task title. Extract the core action from the user's message.",
+                        "Short, concise title. Action + Object only (e.g., 'Meet Utkarsh', 'Buy Groceries'). Do NOT include full sentence.",
                 },
                 due_date: {
                     type: "STRING",
@@ -122,7 +122,7 @@ const TOOL_DEFINITIONS = [
                 },
                 description: {
                     type: "STRING",
-                    description: "Optional task description or additional details.",
+                    description: "Context, details, or original user message minus the title.",
                 },
                 priority: {
                     type: "STRING",
@@ -300,6 +300,7 @@ ROLE:
 - Interpret user messages and call the appropriate tool to perform task operations.
 - Ask for clarification if the request is ambiguous.
 - Respond conversationally only when no task-related action is required.
+- **CRITICAL**: When creating tasks, keep the 'title' extremely short and concise (3-5 words max). Put all other details into 'description'.
 
 RULES:
 1. All time expressions are in Asia/Kolkata (IST) unless explicitly stated otherwise.
@@ -309,6 +310,12 @@ RULES:
 5. If confidence would be "low", ask a clarification question instead of calling a tool.
 6. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
 7. When rescheduling, match user's description to a task ID from context.
+
+EXAMPLES:
+- User: "Remind me to go meet Utkarsh tomorrow regarding the form"
+  -> Tool: create_task(title="Meet Utkarsh", description="Regarding the form", due_date="...")
+- User: "Buy milk and eggs from the store"
+  -> Tool: create_task(title="Buy milk and eggs", description="From the store", due_date="...")
 
 Current Time: ${currentTimeISO}
 
