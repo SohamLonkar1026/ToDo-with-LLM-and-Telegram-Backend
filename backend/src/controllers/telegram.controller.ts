@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as linkService from '../services/telegram.link.service';
-import { handleMessage, handleCallbackQuery } from "../services/telegram.poller";
+import { handleMessage, handleCallbackQuery } from "../services/telegram.handler";
 
 export const generateLink = async (req: AuthRequest, res: Response) => {
     try {

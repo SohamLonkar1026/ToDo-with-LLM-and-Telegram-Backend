@@ -16,12 +16,13 @@ export const getReminderMetrics = () => ({
 });
 
 export const startReminderJob = () => {
-    console.log("[SCHEDULER] Initializing Reminder Job...");
+    console.log(`[CRON INIT] Reminder Job initialized | PID: ${process.pid}`);
 
     // Schedule: Every minute (Robust cron syntax)
     // Schedule: Every minute (Robust cron syntax)
     // Concurrency Guard: Ensure only one instance runs at a time
     cron.schedule("* * * * *", async () => {
+        console.log(`[CRON RUN] Checking reminders | PID: ${process.pid} | ${new Date().toISOString()}`);
         if (isJobRunning) return;
         isJobRunning = true;
 

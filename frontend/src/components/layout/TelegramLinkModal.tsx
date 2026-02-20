@@ -126,12 +126,12 @@ export default function TelegramLinkModal({ isOpen, onClose }: TelegramLinkModal
                                 Bot Chat Link:
                             </p>
                             <a
-                                href="https://t.me/aimmom1212"
+                                href="https://t.me/Aimom1121bot"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-blue-500 hover:text-blue-600 underline font-medium"
                             >
-                                https://t.me/aimmom1212
+                                https://t.me/Aimom1121bot
                             </a>
                         </div>
 
