@@ -1,3 +1,6 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "Priority" AS ENUM ('LOW', 'MEDIUM', 'HIGH');
 
@@ -20,6 +23,9 @@ CREATE TABLE "User" (
     "telegramChatId" TEXT,
     "telegramLinkCode" TEXT,
     "telegramLinkExpiresAt" TIMESTAMP(3),
+    "defaultNotifyBeforeHours" INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+    "defaultNotifyPercentage" INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+    "defaultMinGapMinutes" INTEGER NOT NULL DEFAULT 58,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
@@ -33,11 +39,14 @@ CREATE TABLE "Task" (
     "estimatedMinutes" INTEGER NOT NULL,
     "priority" "Priority" NOT NULL DEFAULT 'MEDIUM',
     "status" "Status" NOT NULL DEFAULT 'PENDING',
-    "reminderOffsetMinutes" INTEGER NOT NULL DEFAULT 60,
+    "notifyBeforeHours" INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+    "notifyPercentage" INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+    "minGapMinutes" INTEGER NOT NULL DEFAULT 58,
     "userId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "lastReminderSentAt" TIMESTAMP(3),
+    "reminderStagesSent" JSONB DEFAULT '[]',
     "snoozedUntil" TIMESTAMP(3),
     "recurringTemplateId" TEXT,
 
