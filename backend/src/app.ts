@@ -8,11 +8,35 @@ import notificationRoutes from "./routes/notification.routes";
 import telegramRoutes from "./routes/telegram.routes";
 import { errorMiddleware } from "./middleware/error.middleware";
 import env from "./config/env";
+import { telegramWebhook } from "./controllers/telegram.controller";
+import aiRoutes from "./routes/ai.routes";
 
 const app = express();
 
-// Security Middleware
+console.log("🔥 DEPLOY VERSION: CORS FIX ACTIVE 🔥");
+
+// ----------------------------------------------------------------------
+// 🚨 CRITICAL: CORS MUST BE THE FIRST MIDDLEWARE
+// ----------------------------------------------------------------------
+app.use(
+    cors({
+        origin: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://aimom-black.vercel.app"
+        ],
+        credentials: true
+    })
+);
+
+// Explicit Preflight Handling
+app.options("*", cors());
+
+// ----------------------------------------------------------------------
+// Security & Body Parsing
+// ----------------------------------------------------------------------
 app.use(helmet());
+app.use(express.json({ limit: '1mb' }));
 
 // Request Logger (Dev only)
 if (env.NODE_ENV !== 'production') {
@@ -22,33 +46,19 @@ if (env.NODE_ENV !== 'production') {
     });
 }
 
-// CORS
-const allowedOrigins = env.NODE_ENV === 'production'
-    ? [env.FRONTEND_URL]
-    : ['http://localhost:5173'];
-
-app.use(
-    cors({
-        origin: allowedOrigins,
-        credentials: true,
-    })
-);
-
-// Body parsing
-app.use(express.json({ limit: '1mb' }));
+// ----------------------------------------------------------------------
+// Routes
+// ----------------------------------------------------------------------
 
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ success: true, message: "AI-MOM API is running." });
 });
 
-// Webhook Route (Before other routes if specific parsing needed, but standard JSON body parser is fine here)
-import { telegramWebhook } from "./controllers/telegram.controller";
+// Webhook
 app.post("/api/telegram/webhook", telegramWebhook);
 
-import aiRoutes from "./routes/ai.routes";
-
-// Routes
+// API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/recurring", recurringRoutes);

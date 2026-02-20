@@ -118,7 +118,7 @@ async function executeCreateTask(userId: string, args: any): Promise<ToolResult>
         return {
             success: true,
             message: `Task "${task.title}" created successfully.\nDue: ${dueDateIST}\nPriority: ${priority}`,
-            data: { taskId: task.id, title: task.title, dueDate: task.dueDate }
+            data: { taskId: task.id, title: task.title, dueDate: task.dueDate, dueDateFormatted: dueDateIST, priority: priority }
         };
     } catch (error) {
         console.error("[TOOL_EXECUTOR] create_task failed:", error);
@@ -160,7 +160,7 @@ async function executeRescheduleTask(userId: string, args: any): Promise<ToolRes
         return {
             success: true,
             message: `Task "${task.title}" rescheduled to ${newDateIST}.`,
-            data: { taskId: updatedTask.id, title: updatedTask.title, newDueDate: updatedTask.dueDate }
+            data: { taskId: updatedTask.id, title: updatedTask.title, newDueDate: updatedTask.dueDate, dueDateFormatted: newDateIST }
         };
     } catch (error: any) {
         if (error?.status === 404) {
@@ -199,6 +199,16 @@ async function executeGetTasks(userId: string, args: any): Promise<ToolResult> {
             tasks = tasks.filter(t => t.title.toLowerCase().includes(kw));
         }
 
+        // Sort by Priority (HIGH > MEDIUM > LOW) then Due Date (Ascending)
+        const priorityWeight: Record<string, number> = { "URGENT": 3, "HIGH": 3, "MEDIUM": 2, "LOW": 1 };
+
+        tasks.sort((a, b) => {
+            const pA = priorityWeight[a.priority] || 0;
+            const pB = priorityWeight[b.priority] || 0;
+            if (pA !== pB) return pB - pA; // Higher priority first
+            return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(); // Sooner due date first
+        });
+
         if (tasks.length === 0) {
             return { success: true, message: "No pending tasks found matching your criteria." };
         }
@@ -226,12 +236,41 @@ async function executeGetTasks(userId: string, args: any): Promise<ToolResult> {
     }
 }
 
+// ─── Complete Task Executor ──────────────────────────────────────────────────
+
+async function executeCompleteTask(userId: string, args: any): Promise<ToolResult> {
+    if (!args.task_id || typeof args.task_id !== "string") {
+        return { success: false, message: "Task ID is required." };
+    }
+
+    try {
+        const task = await taskService.getTaskById(userId, args.task_id);
+
+        await taskService.updateTask(userId, args.task_id, { status: "COMPLETED" });
+
+        console.log(`[TOOL_EXECUTOR_DB] complete_task — "${task.title}" marked COMPLETED`);
+
+        return {
+            success: true,
+            message: `Task "${task.title}" marked as completed.`,
+            data: { taskId: task.id, title: task.title },
+        };
+    } catch (error: any) {
+        if (error?.status === 404) {
+            return { success: false, message: "Task not found. Please check the task ID." };
+        }
+        console.error("[TOOL_EXECUTOR] complete_task failed:", error);
+        return { success: false, message: "Failed to complete task. Please try again." };
+    }
+}
+
 // ─── Public Executor ─────────────────────────────────────────────────────────
 
 const TOOL_MAP: Record<string, (userId: string, args: any) => Promise<ToolResult>> = {
     create_task: executeCreateTask,
     reschedule_task: executeRescheduleTask,
     get_tasks: executeGetTasks,
+    complete_task: executeCompleteTask,
 };
 
 export async function executeTool(toolName: string, userId: string, args: any): Promise<ToolResult> {

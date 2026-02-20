@@ -1,16 +1,18 @@
-import { GoogleGenerativeAI, FunctionCallingMode, SchemaType } from "@google/generative-ai";
 import prisma from "../utils/prisma";
 import { sendMessage } from "./telegram.service";
 import { executeTool } from "./tool-executor.service";
 import { formatInTimeZone } from "date-fns-tz";
+import OpenAI from "openai";
 
-// ─── Gemini Init ─────────────────────────────────────────────────────────────
+// ─── OpenAI Init ─────────────────────────────────────────────────────────────
 
-if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY is not defined in environment variables");
+if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not defined in environment variables");
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 // ─── Rate Limiter (In-Memory) ────────────────────────────────────────────────
 
@@ -39,83 +41,97 @@ function isRateLimited(chatId: string): boolean {
     return false;
 }
 
-// ─── Allowed Tools & Required Fields ─────────────────────────────────────────
+// ─── Conversation History (In-Memory) ────────────────────────────────────────
 
-const ALLOWED_TOOLS = new Set(["create_task", "reschedule_task", "get_tasks"]);
+const MAX_HISTORY = 10; // last N messages per chat
+const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
-const REQUIRED_FIELDS: Record<string, string[]> = {
-    create_task: ["title", "due_date", "confidence"],
-    reschedule_task: ["task_id", "new_due_date", "confidence"],
-    get_tasks: ["confidence"],
-};
-
-const VALID_CONFIDENCE = new Set(["high", "medium", "low"]);
-
-// ─── Defensive Gemini Output Validator ───────────────────────────────────────
-
-function validateToolCall(toolName: string, args: any): { valid: boolean; error?: string } {
-    // 1. Tool name must be in allowed set
-    if (!ALLOWED_TOOLS.has(toolName)) {
-        return { valid: false, error: `Unknown tool: "${toolName}"` };
+function addToHistory(chatId: string, role: "user" | "assistant", content: string): void {
+    if (!conversationHistory.has(chatId)) {
+        conversationHistory.set(chatId, []);
     }
-
-    // 2. Arguments must exist and be an object
-    if (!args || typeof args !== "object") {
-        return { valid: false, error: `Missing or invalid arguments for ${toolName}` };
+    const history = conversationHistory.get(chatId)!;
+    history.push({ role, content });
+    // Keep only last N messages
+    if (history.length > MAX_HISTORY) {
+        history.splice(0, history.length - MAX_HISTORY);
     }
-
-    // 3. All required fields must be present
-    const required = REQUIRED_FIELDS[toolName];
-    for (const field of required) {
-        if (args[field] === undefined || args[field] === null) {
-            return { valid: false, error: `Missing required field "${field}" for ${toolName}` };
-        }
-    }
-
-    // 4. Confidence must be valid enum
-    if (!VALID_CONFIDENCE.has(args.confidence)) {
-        return { valid: false, error: `Invalid confidence value: "${args.confidence}"` };
-    }
-
-    return { valid: true };
 }
 
-// ─── Tool Definitions ────────────────────────────────────────────────────────
+function getHistory(chatId: string): Array<{ role: "user" | "assistant"; content: string }> {
+    return conversationHistory.get(chatId) || [];
+}
 
-// Tool definitions use `as any` cast because the SDK's TypeScript types
-// are overly strict for leaf schema properties. The Gemini API accepts this fine.
+// ─── Pending Clarifications (In-Memory) ──────────────────────────────────────
+
+const CLARIFICATION_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes
+
+const pendingClarifications = new Map<
+    string,
+    {
+        toolName: string;
+        args: any;
+        userId: string;
+        createdAt: number;
+    }
+>();
+
+function buildHumanReadableAction(toolName: string, args: any): string {
+    switch (toolName) {
+        case "create_task":
+            return `create a task titled \"${args.title}\"${args.due_date ? " with the specified due date" : ""}`;
+        case "complete_task":
+            return `mark the task as completed`;
+        case "reschedule_task":
+            return `reschedule task to the new date`;
+        case "get_tasks":
+            return `show your tasks`;
+        default:
+            return `perform this action`;
+    }
+}
+
+// ─── Tool Definitions (Data Only — No SDK Types) ────────────────────────────
+
+// These definitions describe the available tools for function-calling.
+// They will be re-used when OpenAI integration is implemented.
+
 const TOOL_DEFINITIONS = [
     {
         name: "create_task",
-        description: "Create a new task for the user. Call this when the user clearly wants to add a new task, reminder, or to-do item.",
+        description:
+            "Create a new task. IMPORTANT: Extract a very short, concise title (3-5 words). Put all additional context/details into the description field.",
         parameters: {
-            type: SchemaType.OBJECT,
+            type: "OBJECT",
             properties: {
                 title: {
-                    type: SchemaType.STRING,
-                    description: "The task title. Extract the core action from the user's message.",
+                    type: "STRING",
+                    description:
+                        "Short, concise title. Action + Object only (e.g., 'Meet Utkarsh', 'Buy Groceries'). Do NOT include full sentence.",
                 },
                 due_date: {
-                    type: SchemaType.STRING,
-                    description: "The due date in ISO 8601 format with timezone offset. Interpret user times as Asia/Kolkata (IST). Examples: '2026-02-20T17:00:00+05:30' for 5pm IST.",
+                    type: "STRING",
+                    description:
+                        "The due date in ISO 8601 format with timezone offset. Interpret user times as Asia/Kolkata (IST). Examples: '2026-02-20T17:00:00+05:30' for 5pm IST.",
                 },
                 confidence: {
-                    type: SchemaType.STRING,
-                    description: "Your confidence in interpreting this request. 'high' = intent and time are clear. 'medium' = minor inference required. 'low' = ambiguity exists.",
+                    type: "STRING",
+                    description:
+                        "Your confidence in interpreting this request. 'high' = intent and time are clear. 'medium' = minor inference required. 'low' = ambiguity exists.",
                     enum: ["high", "medium", "low"],
                 },
                 description: {
-                    type: SchemaType.STRING,
-                    description: "Optional description or extra details about the task.",
+                    type: "STRING",
+                    description: "Context, details, or original user message minus the title.",
                 },
                 priority: {
-                    type: SchemaType.STRING,
-                    description: "Task priority. Infer from context: 'urgent'/'important' = HIGH, default = MEDIUM.",
-                    enum: ["LOW", "MEDIUM", "HIGH"],
+                    type: "STRING",
+                    description: "Task priority. RULES: 'HIGH' if user says 'urgent', 'critical', 'emergency', or due within 24h. 'LOW' for small tasks like 'buy milk', 'gym'. Default to 'MEDIUM'.",
+                    enum: ["LOW", "MEDIUM", "HIGH", "URGENT"],
                 },
                 estimated_minutes: {
-                    type: SchemaType.INTEGER,
-                    description: "Estimated time in minutes. Infer from context: 'quick' = 15, 'long' = 60. Default 30.",
+                    type: "NUMBER",
+                    description: "Estimated time to complete in minutes.",
                 },
             },
             required: ["title", "due_date", "confidence"],
@@ -123,21 +139,23 @@ const TOOL_DEFINITIONS = [
     },
     {
         name: "reschedule_task",
-        description: "Reschedule an existing task to a new date/time. Call this when the user explicitly wants to move, postpone, or change a task's due date. You MUST provide a valid task_id from the user's task list.",
+        description:
+            "Reschedule an existing task to a new date/time. Call when the user wants to move, postpone, or reschedule a task.",
         parameters: {
-            type: SchemaType.OBJECT,
+            type: "OBJECT",
             properties: {
                 task_id: {
-                    type: SchemaType.STRING,
-                    description: "The ID of the task to reschedule. Must be a valid task ID from the provided task context.",
+                    type: "STRING",
+                    description: "The ID of the task to reschedule.",
                 },
                 new_due_date: {
-                    type: SchemaType.STRING,
-                    description: "The new due date in ISO 8601 format with timezone offset.",
+                    type: "STRING",
+                    description:
+                        "New due date in ISO 8601 format with timezone offset.",
                 },
                 confidence: {
-                    type: SchemaType.STRING,
-                    description: "Your confidence in interpreting this request.",
+                    type: "STRING",
+                    description: "Confidence in interpretation.",
                     enum: ["high", "medium", "low"],
                 },
             },
@@ -146,30 +164,134 @@ const TOOL_DEFINITIONS = [
     },
     {
         name: "get_tasks",
-        description: "Retrieve the user's tasks. Call this when the user asks about their pending, upcoming, today's, or specific-date tasks.",
+        description:
+            "Get the user's tasks. Call when the user wants to see, list, or check their tasks. Returns tasks sorted by Priority (High->Low) then Date.",
         parameters: {
-            type: SchemaType.OBJECT,
+            type: "OBJECT",
             properties: {
-                date_filter: {
-                    type: SchemaType.STRING,
-                    description: "Optional date filter in YYYY-MM-DD format. Use for 'today', 'tomorrow', or specific dates.",
-                },
-                keyword: {
-                    type: SchemaType.STRING,
-                    description: "Optional keyword to filter tasks by title.",
+                status: {
+                    type: "STRING",
+                    description: "Filter by status.",
+                    enum: ["PENDING", "COMPLETED", "ALL"],
                 },
                 confidence: {
-                    type: SchemaType.STRING,
-                    description: "Your confidence in interpreting this request.",
+                    type: "STRING",
+                    description: "Confidence in interpretation.",
                     enum: ["high", "medium", "low"],
                 },
             },
             required: ["confidence"],
         },
     },
-] as any;
+    {
+        name: "complete_task",
+        description:
+            "Mark an existing task as completed/done. Call when the user says they finished, completed, or did a task.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                task_id: {
+                    type: "STRING",
+                    description: "The ID of the task to mark as completed. Match from the task context.",
+                },
+                confidence: {
+                    type: "STRING",
+                    description: "Confidence in interpretation.",
+                    enum: ["high", "medium", "low"],
+                },
+            },
+            required: ["task_id", "confidence"],
+        },
+    },
+];
 
-// ─── System Prompt ───────────────────────────────────────────────────────────
+// ─── Defensive Tool Call Validator ───────────────────────────────────────────
+
+const ALLOWED_TOOLS = new Set(["create_task", "reschedule_task", "get_tasks", "complete_task"]);
+
+const REQUIRED_FIELDS: Record<string, string[]> = {
+    create_task: ["title", "due_date", "confidence"],
+    reschedule_task: ["task_id", "new_due_date", "confidence"],
+    get_tasks: ["confidence"],
+    complete_task: ["task_id", "confidence"],
+};
+
+const ALLOWED_FIELDS: Record<string, string[]> = {
+    create_task: ["title", "due_date", "confidence", "description", "priority", "estimated_minutes"],
+    reschedule_task: ["task_id", "new_due_date", "confidence"],
+    get_tasks: ["status", "confidence"],
+    complete_task: ["task_id", "confidence"],
+};
+
+function validateToolCall(
+    toolName: string,
+    args: any,
+    confidence: string
+): { valid: boolean; reason?: string } {
+    // 1. Tool name check
+    if (!ALLOWED_TOOLS.has(toolName)) {
+        return { valid: false, reason: `Unknown tool: "${toolName}"` };
+    }
+
+    // 2. Arguments object check
+    if (!args || typeof args !== "object") {
+        return { valid: false, reason: "Arguments missing or not an object" };
+    }
+
+    // 3. Required fields check
+    const required = REQUIRED_FIELDS[toolName] || [];
+    for (const field of required) {
+        if (!(field in args)) {
+            return { valid: false, reason: `Missing required field: "${field}"` };
+        }
+    }
+
+    // 4. Unexpected keys check
+    const allowed = ALLOWED_FIELDS[toolName] || [];
+    for (const key of Object.keys(args)) {
+        if (!allowed.includes(key)) {
+            return { valid: false, reason: `Unexpected field: "${key}"` };
+        }
+    }
+
+    // 5. Confidence enum check
+    if (!["high", "medium", "low"].includes(confidence)) {
+        return { valid: false, reason: `Invalid confidence: "${confidence}"` };
+    }
+
+    return { valid: true };
+}
+
+// ─── Context Builder ────────────────────────────────────────────────────────
+
+async function buildTaskContext(userId: string): Promise<string> {
+    try {
+        const tasks = await prisma.task.findMany({
+            where: { userId, status: "PENDING" },
+            orderBy: { dueDate: "asc" },
+            take: 10,
+            select: { id: true, title: true, dueDate: true, priority: true },
+        });
+
+        if (tasks.length === 0) return "User has no pending tasks.";
+
+        const lines = tasks.map((t) => {
+            const due = formatInTimeZone(
+                t.dueDate,
+                "Asia/Kolkata",
+                "EEE, dd MMM yyyy hh:mm a"
+            );
+            return `- [${t.id}] "${t.title}" due ${due} (${t.priority})`;
+        });
+
+        return `User's pending tasks (${tasks.length}):\n${lines.join("\n")}`;
+    } catch (error) {
+        console.error("[AI_ENGINE] Failed to build task context:", error);
+        return "Could not retrieve tasks.";
+    }
+}
+
+// ─── System Prompt Builder ──────────────────────────────────────────────────
 
 function buildSystemPrompt(currentTimeISO: string): string {
     return `You are an AI Task Operations Assistant integrated into a Telegram-based task management system.
@@ -178,25 +300,26 @@ ROLE:
 - Interpret user messages and call the appropriate tool to perform task operations.
 - Ask for clarification if the request is ambiguous.
 - Respond conversationally only when no task-related action is required.
+- **CRITICAL**: When creating tasks, keep the 'title' extremely short and concise (3-5 words max). Put all other details into 'description'.
 
 RULES:
 1. All time expressions are in Asia/Kolkata (IST) unless explicitly stated otherwise.
 2. Return dates in ISO 8601 format with timezone offset (+05:30 for IST).
 3. Only call a tool when intent is clear.
-4. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
-5. If confidence would be "low", ask a clarification question instead of calling a tool.
-6. Never fabricate a task_id. Only use task IDs from the provided context.
-7. If multiple tasks match a description, ask which one the user means.
-8. If user says "that", "it", or similar without clear context, ask for clarification.
+4. **PRIORITY RULES**:
+   - Set **HIGH** if: user says "urgent", "critical", "emergency", "must do", OR due date is within 24 hours.
+   - Set **LOW** if: small/routine tasks like "buy milk", "go to gym", "call mom".
+   - Set **MEDIUM** (default) if no specific urgency mentioned.
+5. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
+6. If confidence would be "low", ask a clarification question instead of calling a tool.
+7. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
+8. When rescheduling, match user's description to a task ID from context.
 
-TIME DEFAULTS:
-- "morning" → 09:00 IST
-- "afternoon" → 15:00 IST
-- "evening" → 18:00 IST
-- "tonight" → 21:00 IST
-- "tomorrow" → next calendar day
-- If only date provided, no time → default 09:00 IST
-- If both date and time → use exact time
+EXAMPLES:
+- User: "Remind me to go meet Utkarsh tomorrow regarding the form"
+  -> Tool: create_task(title="Meet Utkarsh", description="Regarding the form", due_date="...")
+- User: "Buy milk and eggs from the store"
+  -> Tool: create_task(title="Buy milk and eggs", description="From the store", due_date="...")
 
 Current Time: ${currentTimeISO}
 
@@ -206,224 +329,273 @@ RESPONSE FORMAT:
 - Do not use Markdown formatting.`;
 }
 
-// ─── Task Context Builder ────────────────────────────────────────────────────
+// ─── Normalize Tool Definitions for OpenAI ──────────────────────────────────
 
-async function buildTaskContext(userId: string): Promise<string> {
-    const tasks = await prisma.task.findMany({
-        where: {
-            userId: userId,
-            status: "PENDING",
-        },
-        select: {
-            id: true,
-            title: true,
-            dueDate: true,
-        },
-        orderBy: { dueDate: "asc" },
-        take: 20,
-    });
-
-    if (tasks.length === 0) {
-        return "User has no pending tasks.";
+function lowercaseTypes(obj: any): any {
+    if (Array.isArray(obj)) return obj.map(lowercaseTypes);
+    if (obj && typeof obj === "object") {
+        const out: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+            if (key === "type" && typeof value === "string") {
+                out[key] = value.toLowerCase();
+            } else {
+                out[key] = lowercaseTypes(value);
+            }
+        }
+        return out;
     }
-
-    const taskLines = tasks.map(t => {
-        const dueDateIST = formatInTimeZone(new Date(t.dueDate), "Asia/Kolkata", "yyyy-MM-dd HH:mm");
-        return `- ID: ${t.id} | Title: "${t.title}" | Due: ${dueDateIST} IST`;
-    });
-
-    return `User's pending tasks (${tasks.length}):\n${taskLines.join("\n")}`;
+    return obj;
 }
 
-// ─── Confidence Gating ───────────────────────────────────────────────────────
-
-function checkConfidence(args: any): { allowed: boolean; confidence: string } {
-    const confidence = args?.confidence || "low";
-
-    if (confidence === "low") {
-        return { allowed: false, confidence };
-    }
-
-    // high and medium are allowed to execute
-    return { allowed: true, confidence };
-}
+const openAITools = TOOL_DEFINITIONS.map((tool) => ({
+    type: "function" as const,
+    function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: lowercaseTypes(tool.parameters),
+    },
+}));
 
 // ─── Main Processor ──────────────────────────────────────────────────────────
 
+// ─── Main Processor ──────────────────────────────────────────────────────────
+
+async function sendAndTrackMessage(chatId: string, text: string) {
+    addToHistory(chatId, "assistant", text);
+    try {
+        await sendMessage(chatId, text);
+    } catch (error) {
+        console.error(`[AI_ENGINE] Failed to send message to ${chatId}:`, error);
+    }
+}
+
 export async function processMessage(chatId: string, userText: string): Promise<void> {
     try {
-        // 0. Rate limiting
+        // 0. Check for pending clarification (yes/no response)
+        const pending = pendingClarifications.get(chatId);
+        if (pending) {
+            // Expire stale clarifications
+            if (Date.now() - pending.createdAt > CLARIFICATION_EXPIRY_MS) {
+                pendingClarifications.delete(chatId);
+            } else {
+                // Add user response to history
+                addToHistory(chatId, "user", userText);
+
+                const text = userText.toLowerCase().trim();
+                const YES_WORDS = ["yes", "ya", "haan", "ok", "sure", "yep", "yeah", "y"];
+                const NO_WORDS = ["no", "cancel", "nahi", "nope", "n"];
+
+                if (YES_WORDS.includes(text)) {
+                    const result = await executeTool(pending.toolName, pending.userId, pending.args);
+                    pendingClarifications.delete(chatId);
+
+                    if (!result.success) {
+                        await sendAndTrackMessage(chatId, `❌ ${result.message}`);
+                        return;
+                    }
+
+                    switch (pending.toolName) {
+                        case "create_task":
+                            await sendAndTrackMessage(
+                                chatId,
+                                `✅ <b>Task Created</b>\n\n` +
+                                `📌 Title: ${result.data?.title || pending.args.title}\n` +
+                                `🗓 Due: ${result.data?.dueDateFormatted || "N/A"}\n` +
+                                `⚡ Priority: ${result.data?.priority || "MEDIUM"}`
+                            );
+                            break;
+                        case "reschedule_task":
+                            await sendAndTrackMessage(
+                                chatId,
+                                `🔄 <b>Task Rescheduled</b>\n\n` +
+                                `📌 ${result.data?.title || "Task"}\n` +
+                                `🗓 New Due: ${result.data?.dueDateFormatted || "N/A"}`
+                            );
+                            break;
+                        case "complete_task":
+                            await sendAndTrackMessage(
+                                chatId,
+                                `✅ <b>Task Completed</b>\n\n` +
+                                `📌 "${result.data?.title || "Task"}" marked as done.`
+                            );
+                            break;
+                        default:
+                            await sendAndTrackMessage(chatId, result.message);
+                    }
+                    return;
+                }
+
+                if (NO_WORDS.includes(text)) {
+                    pendingClarifications.delete(chatId);
+                    await sendAndTrackMessage(chatId, "❌ Cancelled.");
+                    return;
+                }
+
+                // Not yes/no — clear pending and process as new message
+                pendingClarifications.delete(chatId);
+            }
+        }
+
+        // 0b. Rate limiting
         if (isRateLimited(chatId)) {
             await sendMessage(chatId, "⏳ Please wait a moment before sending another request.");
             return;
         }
 
         // 1. Look up user
-        const user = await prisma.user.findFirst({
-            where: { telegramChatId: chatId },
-        });
-
+        const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
         if (!user) {
-            await sendMessage(chatId, "❌ Please link your account first.\nType <code>/link &lt;code&gt;</code> to get started.");
+            await sendMessage(chatId, "❌ Please link your account first.\nType <code>/link &lt;code&gt;</code>.");
             return;
         }
 
-        // 2. Build context
-        const currentTime = new Date();
-        const currentTimeIST = formatInTimeZone(currentTime, "Asia/Kolkata", "yyyy-MM-dd'T'HH:mm:ssXXX");
-        const systemPrompt = buildSystemPrompt(currentTimeIST);
+        // 2. Add to history & Build context
+        addToHistory(chatId, "user", userText);
+
+        const currentTimeISO = formatInTimeZone(new Date(), "Asia/Kolkata", "yyyy-MM-dd'T'HH:mm:ssXXX");
+        const systemPrompt = buildSystemPrompt(currentTimeISO);
         const taskContext = await buildTaskContext(user.id);
+        const history = getHistory(chatId);
 
-        // 3. Create model with tool-calling
-        const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
-            systemInstruction: systemPrompt,
-            tools: [{ functionDeclarations: TOOL_DEFINITIONS }],
-            toolConfig: {
-                functionCallingConfig: {
-                    mode: FunctionCallingMode.AUTO,
-                },
-            },
-        });
-
-        // 4. Send message to Gemini
-        const userContent = `${taskContext}\n\nUser message: "${userText}"`;
-
+        // 3. Call OpenAI
         console.log(`[AI_ENGINE] Processing message from chatId ${chatId}: "${userText.substring(0, 100)}"`);
 
-        let result;
+        let response;
         try {
-            result = await model.generateContent({
-                contents: [{ role: "user", parts: [{ text: userContent }] }],
-            });
-        } catch (geminiError) {
-            console.error("[AI_ENGINE] Gemini API error:", geminiError);
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
-            return;
-        }
-
-        const response = result.response;
-
-        // 5. Check for function call
-        const candidate = response.candidates?.[0];
-        if (!candidate) {
-            console.error("[AI_ENGINE] No candidates in Gemini response");
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
-            return;
-        }
-
-        const parts = candidate.content?.parts;
-        if (!parts || parts.length === 0) {
-            console.error("[AI_ENGINE] No parts in Gemini response");
-            await sendMessage(chatId, "I couldn't process that request. Please try again.");
-            return;
-        }
-
-        // Check if any part has a function call
-        const functionCallPart = parts.find(p => p.functionCall);
-
-        if (functionCallPart && functionCallPart.functionCall) {
-            const fc = functionCallPart.functionCall;
-            const toolName = fc.name;
-            const toolArgs = fc.args as any;
-
-            console.log(`[AI_ENGINE] Function call: ${toolName}`, JSON.stringify(toolArgs));
-
-            // 5a. Defensive validation of Gemini output
-            const validation = validateToolCall(toolName, toolArgs);
-            if (!validation.valid) {
-                console.error(`[AI_ENGINE] Tool call validation FAILED: ${validation.error}`);
-                await sendMessage(chatId, "I couldn't safely process that request. Please try again.");
-                return;
-            }
-
-            // 6. Confidence gating
-            const confidenceCheck = checkConfidence(toolArgs);
-
-            if (!confidenceCheck.allowed) {
-                // Low confidence — ask Gemini to generate a clarification question
-                console.log(`[AI_ENGINE] Confidence LOW — blocking execution for ${toolName}`);
-
-                try {
-                    const clarificationResult = await model.generateContent({
-                        contents: [
-                            { role: "user", parts: [{ text: userContent }] },
-                            { role: "model", parts: [{ functionCall: fc }] },
-                            {
-                                role: "user",
-                                parts: [{
-                                    text: `Your confidence for this action is LOW. Do NOT execute the tool. Instead, ask the user a clarification question to better understand their intent. Be specific about what is ambiguous.`
-                                }]
-                            },
-                        ],
-                    });
-
-                    const clarificationText = clarificationResult.response.text();
-                    await sendMessage(chatId, clarificationText || "Could you please clarify your request?");
-                } catch (clarifyError) {
-                    console.error("[AI_ENGINE] Clarification generation failed:", clarifyError);
-                    await sendMessage(chatId, "Could you please clarify your request? I'm not sure what you'd like me to do.");
-                }
-                return;
-            }
-
-            // 7. Execute tool
-            const toolResult = await executeTool(toolName, user.id, toolArgs);
-
-            // 8. Feed result back to Gemini for final response
-            // For MEDIUM confidence, instruct Gemini to prepend assumption transparency
-            const isMedium = confidenceCheck.confidence === "medium";
-            const mediumPrefix = isMedium
-                ? `The tool was executed with MEDIUM confidence. In your response, briefly mention what assumption you made. For example: "Assuming you meant tomorrow at 5pm, I've scheduled the task." Be transparent about the inference.`
-                : "";
-
-            try {
-                const followUpContents: any[] = [
-                    { role: "user", parts: [{ text: userContent }] },
-                    { role: "model", parts: [{ functionCall: fc }] },
+            response = await openai.chat.completions.create({
+                model: "gpt-4.1",
+                messages: [
+                    { role: "system", content: systemPrompt },
                     {
-                        role: "function",
-                        parts: [{
-                            functionResponse: {
-                                name: toolName,
-                                response: {
-                                    success: toolResult.success,
-                                    message: toolResult.message,
-                                },
-                            },
-                        }],
-                    },
-                ];
-
-                // Inject medium-confidence transparency instruction
-                if (isMedium) {
-                    followUpContents.push({
                         role: "user",
-                        parts: [{ text: mediumPrefix }],
-                    });
-                }
+                        content: `Current Task Context:\n${taskContext}`,
+                    },
+                    ...history, // Inject conversation history
+                ],
+                tools: openAITools,
+                tool_choice: "auto",
+                temperature: 0.2,
+            });
+        } catch (aiError) {
+            console.error("[AI_ENGINE] OpenAI API error:", aiError);
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
 
-                const followUpResult = await model.generateContent({
-                    contents: followUpContents,
-                });
+        const message = response.choices[0]?.message;
+        if (!message) {
+            console.error("[AI_ENGINE] No message in OpenAI response");
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
 
-                const finalText = followUpResult.response.text();
-                await sendMessage(chatId, finalText || toolResult.message);
-            } catch (followUpError) {
-                // If Gemini fails on follow-up, send the raw tool result
-                console.error("[AI_ENGINE] Follow-up generation failed:", followUpError);
-                await sendMessage(chatId, toolResult.message);
-            }
+        // 4. No tool call — conversational response
+        if (!message.tool_calls || message.tool_calls.length === 0) {
+            const textResponse = message.content || "I'm not sure how to help with that. Try describing a task to create.";
+            await sendAndTrackMessage(chatId, textResponse);
+            return;
+        }
 
-        } else {
-            // No function call — plain text response
-            const textResponse = response.text();
+        // 5. Extract tool call
+        const toolCall = message.tool_calls[0];
 
-            if (textResponse) {
-                await sendMessage(chatId, textResponse);
-            } else {
-                await sendMessage(chatId, "I'm not sure how to help with that. Try asking about your tasks or creating a new one.");
-            }
+        if (toolCall.type !== "function") {
+            console.warn(`[AI_ENGINE] Unsupported tool call type: ${toolCall.type}`);
+            await sendAndTrackMessage(chatId, "I couldn't process that request. Please try again.");
+            return;
+        }
+
+        const toolName = toolCall.function.name;
+        let args: any;
+
+        try {
+            args = JSON.parse(toolCall.function.arguments);
+        } catch (parseError) {
+            console.error("[AI_ENGINE] Failed to parse tool arguments:", toolCall.function.arguments);
+            await sendAndTrackMessage(chatId, "I couldn't safely process that request. Please try again.");
+            return;
+        }
+
+        console.log(`[AI_ENGINE] Function call: ${toolName}`, JSON.stringify(args));
+
+        // 6. Defensive validation
+        const confidence = args.confidence || "low";
+        const validation = validateToolCall(toolName, args, confidence);
+
+        if (!validation.valid) {
+            console.warn(`[AI_ENGINE] Validation failed: ${validation.reason}`);
+            await sendAndTrackMessage(chatId, "I couldn't safely process that request. Please try again.");
+            return;
+        }
+
+        // 7. Confidence gating
+        if (confidence === "low") {
+            // Low confidence — do NOT execute, ask for clarification
+            await sendAndTrackMessage(chatId, "Could you please clarify what you'd like to do? Try being more specific with the task and time.");
+            return;
+        }
+
+        if (confidence === "medium") {
+            // Medium confidence — store pending, ask for confirmation
+            const action = buildHumanReadableAction(toolName, args);
+            pendingClarifications.set(chatId, {
+                toolName,
+                args,
+                userId: user.id,
+                createdAt: Date.now(),
+            });
+
+            await sendAndTrackMessage(
+                chatId,
+                `🤔 Just to confirm — should I <b>${action}</b>?\n\nReply <b>Yes</b> or <b>No</b>.`
+            );
+            return;
+        }
+
+        // 8. Execute tool
+        const result = await executeTool(toolName, user.id, args);
+
+        // 9. Deterministic confirmation — no second AI call
+        if (!result.success) {
+            await sendAndTrackMessage(chatId, `❌ ${result.message}`);
+            return;
+        }
+
+        switch (toolName) {
+            case "create_task":
+                await sendAndTrackMessage(
+                    chatId,
+                    `✅ <b>Task Created</b>\n\n` +
+                    `📌 Title: ${result.data?.title || args.title}\n` +
+                    `🗓 Due: ${result.data?.dueDateFormatted || "N/A"}\n` +
+                    `⚡ Priority: ${result.data?.priority || "MEDIUM"}`
+                );
+                break;
+
+            case "reschedule_task":
+                await sendAndTrackMessage(
+                    chatId,
+                    `🔄 <b>Task Rescheduled</b>\n\n` +
+                    `📌 ${result.data?.title || "Task"}\n` +
+                    `🗓 New Due: ${result.data?.dueDateFormatted || "N/A"}`
+                );
+                break;
+
+            case "complete_task":
+                await sendAndTrackMessage(
+                    chatId,
+                    `✅ <b>Task Completed</b>\n\n` +
+                    `📌 "${result.data?.title || "Task"}" marked as done.`
+                );
+                break;
+
+            case "get_tasks":
+                // get_tasks already returns fully formatted HTML in result.message
+                await sendAndTrackMessage(chatId, result.message);
+                break;
+
+            default:
+                await sendAndTrackMessage(chatId, result.message);
         }
 
     } catch (error) {
@@ -431,3 +603,4 @@ export async function processMessage(chatId: string, userText: string): Promise<
         await sendMessage(chatId, "I couldn't process that request. Please try again.");
     }
 }
+
