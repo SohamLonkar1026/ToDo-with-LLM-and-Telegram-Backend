@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Priority from './pages/Priority';
 import DailyTasks from './pages/DailyTasks';
 import Notifications from './pages/Notifications';
+import Settings from './pages/Settings';
 import Layout from './components/layout/Layout';
 
 function ProtectedRoute() {
@@ -35,6 +36,7 @@ export default function App() {
                             <Route path="/priority" element={<Priority />} />
                             <Route path="/daily" element={<DailyTasks />} />
                             <Route path="/notifications" element={<Notifications />} />
+                            <Route path="/settings" element={<Settings />} />
                         </Route>
                     </Route>
 

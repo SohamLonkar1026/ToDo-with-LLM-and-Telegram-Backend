@@ -2,37 +2,29 @@ import { NotificationType, Task } from "@prisma/client";
 import prisma from "../utils/prisma";
 import * as telegramService from "./telegram.service";
 
-// 2️⃣ Reminder Stage Configuration
-const REMINDER_STAGES = [
-    { key: "12h", offsetMs: 12 * 60 * 60 * 1000 },
-    { key: "6h", offsetMs: 6 * 60 * 60 * 1000 },
-    { key: "3h", offsetMs: 3 * 60 * 60 * 1000 },
-    { key: "1h", offsetMs: 1 * 60 * 60 * 1000 }
-];
+// 2️⃣ Cron Execution Contract
+const TOLERANCE_WINDOW_MS = 60 * 1000; // 60 seconds
 
-// Tolerance window to prevent spam after downtime
-const TOLERANCE_MS = 2 * 60 * 1000; // 2 minutes
+type Stage = {
+    label: string;
+    triggerTime: Date;
+};
 
 export const checkAndTriggerReminders = async () => {
-    const currentTime = new Date();
-    // Use ISO string for logs
-    if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] Check started at ${currentTime.toISOString()}`);
+    const now = new Date();
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[REMINDER_ENGINE] Check started at ${now.toISOString()}`);
+    }
 
     try {
-        // ------------------------------------------------------------------
-        // QUERY: FETCH CANDIDATE TASKS
-        // ------------------------------------------------------------------
-        // We fetch ALL pending tasks that might need attention.
-        // Filtering happens in memory for complex stage logic.
-        // We optimize by filtering out tasks clearly in the far future,
-        // but since we have 12h reminders, we need tasks at least 12h away.
-        // Actually, fetching all PENDING tasks is safest for now unless volume is huge.
-        // Given earlier "5000 tasks" warning, let's try to be slightly specific if possible,
-        // but 'reminderStagesSent' logic is hard to query purely in SQL without complex JSON ops.
-        // So we fetch PENDING tasks.
+        // 3️⃣ Task Eligibility Rules
         const tasks = await prisma.task.findMany({
             where: {
-                status: "PENDING"
+                status: "PENDING",
+                OR: [
+                    { snoozedUntil: null },
+                    { snoozedUntil: { lte: now } }
+                ]
             }
         });
 
@@ -40,139 +32,201 @@ export const checkAndTriggerReminders = async () => {
             console.warn(`[REMINDER_ENGINE][SAFETY_WARNING] Large task batch detected: ${tasks.length} tasks.`);
         }
 
-        if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] Processing ${tasks.length} pending tasks...`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[REMINDER_ENGINE] Processing ${tasks.length} eligible tasks...`);
+        }
 
         // ------------------------------------------------------------------
         // EXECUTION LOOP
         // ------------------------------------------------------------------
         for (const task of tasks) {
-            let notificationType: NotificationType | null = null;
-            let message = "";
-            let updateData: any = {};
-            let stageKeyToAppend: string | null = null;
+            // 4️⃣ Stage Generation Logic
+            const start = task.createdAt;
+            const due = task.dueDate;
+            const duration = due.getTime() - start.getTime();
 
-            // 🛡️ Guard 1 (Snooze Override)
-            // If snoozedUntil > now, SKIP stage evaluation completely.
-            // But we must check if snooze is EXPIRED.
-            if (task.snoozedUntil) {
-                if (task.snoozedUntil > currentTime) {
-                    continue; // Task is strictly snoozed, ignore.
-                }
-
-                // Snooze Expired? Trigger Snooze Wakeup
-                if (task.snoozedUntil <= currentTime) {
-                    console.log(`[BRANCH] SNOOZE_WAKEUP | TaskID: ${task.id} | snoozedUntil: ${task.snoozedUntil.toISOString()}`);
-                    notificationType = currentTime > task.dueDate ? NotificationType.OVERDUE : NotificationType.REMINDER;
-                    const prefix = notificationType === NotificationType.OVERDUE ? "Snoozed Overdue" : "Snoozed Reminder";
-                    message = `${prefix}: Task "${task.title}" is ready!`;
-                    updateData = { snoozedUntil: null, lastReminderSentAt: currentTime };
-                    if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] [SNOOZE_WAKEUP] Task ${task.id}`);
-                }
+            if (duration <= 0) {
+                continue; // Skip invalid tasks
             }
-            // 🛡️ Multi-Stage Logic (Only if NOT snoozed/wakeup-handled)
-            else if (task.dueDate > currentTime) {
-                // Normalize reminderStagesSent
-                const sentStages: string[] = Array.isArray(task.reminderStagesSent)
-                    ? (task.reminderStagesSent as string[])
-                    : [];
 
-                // Loop Stages
-                for (const stage of REMINDER_STAGES) {
-                    const stageTime = new Date(task.dueDate.getTime() - stage.offsetMs);
+            // 3️⃣ Add Empty Reminder Short-Circuit (Performance Optimization)
+            if (
+                (!task.notifyBeforeHours || (task.notifyBeforeHours as number[]).length === 0) &&
+                (!task.notifyPercentage || (task.notifyPercentage as number[]).length === 0)
+            ) {
+                continue;
+            }
 
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log(`[DEBUG_SCHEDULER] Task ${task.id} Due: ${task.dueDate.toISOString()}`);
-                        console.log(`[DEBUG_SCHEDULER] Stage ${stage.key} Time: ${stageTime.toISOString()}`);
-                        console.log(`[DEBUG_SCHEDULER] Now: ${currentTime.toISOString()}`);
+            // 7️⃣ Defensive JSON Handling
+            const sentStages: string[] = Array.isArray(task.reminderStagesSent)
+                ? (task.reminderStagesSent as string[])
+                : [];
+
+            // Generate candidate stages
+            const stages: Stage[] = [];
+
+            // Time-Based Stages
+            if (task.notifyBeforeHours && Array.isArray(task.notifyBeforeHours)) {
+                for (const hour of task.notifyBeforeHours) {
+                    const triggerTime = new Date(due.getTime() - hour * 60 * 60 * 1000);
+
+                    // Discard if triggerTime <= start
+                    if (triggerTime.getTime() <= start.getTime()) {
+                        continue;
                     }
 
-                    // 🛡️ Guard 2 (CreatedAt): No retroactive reminders
-                    if (stageTime < task.createdAt) continue;
+                    stages.push({
+                        label: `before_${hour}h`,
+                        triggerTime
+                    });
+                }
+            }
 
-                    // 🛡️ Guard 3 (Tolerance): No spam after downtime
-                    // Allow trigger if stageTime is within the last 2 minutes
-                    // condition: stageTime <= now AND stageTime >= now - tolerance
-                    const timeDiff = currentTime.getTime() - stageTime.getTime();
-                    const isDue = stageTime <= currentTime;
-                    const isWithinTolerance = timeDiff <= TOLERANCE_MS;
+            // Percentage-Based Stages
+            if (task.notifyPercentage && Array.isArray(task.notifyPercentage)) {
+                for (const percentage of task.notifyPercentage) {
+                    const triggerTime = new Date(start.getTime() + (percentage / 100) * duration);
 
-                    if (isDue && isWithinTolerance) {
-                        // Check if already sent
-                        if (!sentStages.includes(stage.key)) {
-                            // TRIGGER!
-                            console.log(`[BRANCH] STAGE | TaskID: ${task.id} | Stage: ${stage.key} | timeDiff: ${timeDiff}ms`);
-                            notificationType = NotificationType.REMINDER;
-                            message = `Reminder: Task "${task.title}" is due in ${stage.key}`;
-                            stageKeyToAppend = stage.key;
-                            updateData = {
-                                lastReminderSentAt: currentTime,
-                                reminderStagesSent: [...sentStages, stage.key]
-                            };
-                            if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] [STAGE_${stage.key}] Task ${task.id}`);
+                    // Discard if triggerTime >= due
+                    if (triggerTime.getTime() >= due.getTime()) {
+                        continue;
+                    }
 
-                            // 🛡️ Guard 4 (Break): Only one reminder per tick
-                            break;
+                    stages.push({
+                        label: `percent_${percentage}`,
+                        triggerTime
+                    });
+                }
+            }
+
+            // 6️⃣ Stage Sorting (MANDATORY)
+            stages.sort((a, b) => a.triggerTime.getTime() - b.triggerTime.getTime());
+
+            // 8️⃣ Eligibility Filtering & 9️⃣ Anti-Flood Protection
+            let stageSent = false;
+
+            for (const stage of stages) {
+                // 8️⃣ Eligibility Filtering
+                const isEligibleTime = stage.triggerTime.getTime() <= now.getTime() &&
+                    stage.triggerTime.getTime() > now.getTime() - TOLERANCE_WINDOW_MS;
+                const notAlreadySent = !sentStages.includes(stage.label);
+
+                if (!isEligibleTime || !notAlreadySent) {
+                    continue;
+                }
+
+                // 9️⃣ Anti-Flood Protection (Strict Rule)
+                if (task.lastReminderSentAt) {
+                    const gapMs = now.getTime() - task.lastReminderSentAt.getTime();
+                    const minGapMs = (task.minGapMinutes || 58) * 60 * 1000;
+
+                    if (gapMs < minGapMs) {
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.log(`[ANTI_FLOOD] Task ${task.id} blocked: gap ${gapMs}ms < minGap ${minGapMs}ms`);
                         }
+                        break; // STOP processing this task
                     }
                 }
-            }
-            // 🛡️ Overdue Logic (Separate)
-            else if (currentTime > task.dueDate) {
-                // Condition: Overdue Not Already Sent
-                // usage of lastReminderSentAt for overdue tracking
-                // If lastReminderSentAt is null OR it was sent BEFORE due date, then we haven't sent OVERDUE yet.
-                const neverReminded = !task.lastReminderSentAt;
-                const remindedBeforeDue = task.lastReminderSentAt && task.lastReminderSentAt < task.dueDate;
 
-                if (neverReminded || remindedBeforeDue) {
-                    console.log(`[BRANCH] OVERDUE | TaskID: ${task.id} | neverReminded: ${neverReminded} | remindedBeforeDue: ${remindedBeforeDue} | lastReminderSentAt: ${task.lastReminderSentAt?.toISOString() ?? 'null'} | dueDate: ${task.dueDate.toISOString()}`);
-                    notificationType = NotificationType.OVERDUE;
-                    message = `Overdue: Task "${task.title}" is overdue!`;
-                    updateData = { lastReminderSentAt: currentTime };
-                    if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] [OVERDUE] Task ${task.id}`);
-                }
-            }
+                // Send notification
+                const message = `Reminder: Task "${task.title}" - ${stage.label}`;
 
-            // ------------------------------------------------------------------
-            // TRANSACTION ALREADY
-            // ------------------------------------------------------------------
-            if (notificationType && message) {
-                console.log(`[SEND START] TaskID: ${task.id} | Type: ${notificationType} | Time: ${currentTime.toISOString()}`);
                 try {
                     await prisma.$transaction([
-                        prisma.task.update({ where: { id: task.id }, data: updateData }),
+                        prisma.task.update({
+                            where: { id: task.id },
+                            data: {
+                                lastReminderSentAt: now,
+                                reminderStagesSent: {
+                                    push: stage.label
+                                }
+                            }
+                        }),
                         prisma.notification.create({
                             data: {
                                 userId: task.userId,
                                 taskId: task.id,
-                                type: notificationType,
+                                type: NotificationType.REMINDER,
                                 message: message
                             }
                         })
                     ]);
-                    if (process.env.NODE_ENV !== 'production') console.log(`[REMINDER_ENGINE] [SUCCESS] Notification sent for Task ${task.id}`);
 
-                    // Telegram Notification (Fire & Forget, but logged)
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`[REMINDER_ENGINE] [STAGE_${stage.label}] Task ${task.id} sent successfully`);
+                    }
+
+                    // Telegram Notification (Fire & Forget)
                     try {
                         const user = await prisma.user.findUnique({
                             where: { id: task.userId },
-                            select: { id: true, telegramChatId: true, email: true, password: true, createdAt: true, updatedAt: true }
+                            select: { id: true, telegramChatId: true }
                         });
 
                         if (user && user.telegramChatId) {
                             await telegramService.sendReminderNotification(task, user as any);
-                            console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: SENT`);
-                        } else {
-                            console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: SKIPPED (no chatId)`);
+                            console.log(`[TELEGRAM] Task ${task.id} notification sent`);
                         }
-                    } catch (err) {
-                        console.error("[REMINDER_ENGINE] [TELEGRAM_FAIL]", err);
-                        console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | Telegram: FAILED`);
+                    } catch (telegramError) {
+                        console.error(`[TELEGRAM_FAIL] Task ${task.id}`, telegramError);
                     }
+
+                    stageSent = true;
+                    break; // 🔟 One Stage Per Task Per Cron Cycle
 
                 } catch (txError) {
                     console.error(`[REMINDER_ENGINE] [TX_FAIL] Task ${task.id}`, txError);
-                    console.log(`[SEND END] TaskID: ${task.id} | Type: ${notificationType} | TX: FAILED (no Telegram sent)`);
+                    break;
+                }
+            }
+
+            // Handle overdue tasks (separate logic)
+            const overdueLabel = "overdue";
+            const overdueAlreadySent = sentStages.includes(overdueLabel);
+
+            if (!stageSent && now > due && !overdueAlreadySent) {
+                try {
+                    await prisma.$transaction([
+                        prisma.task.update({
+                            where: { id: task.id },
+                            data: {
+                                lastReminderSentAt: now,
+                                reminderStagesSent: {
+                                    push: overdueLabel
+                                }
+                            }
+                        }),
+                        prisma.notification.create({
+                            data: {
+                                userId: task.userId,
+                                taskId: task.id,
+                                type: NotificationType.OVERDUE,
+                                message: `Overdue: Task "${task.title}" is overdue!`
+                            }
+                        })
+                    ]);
+
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`[REMINDER_ENGINE] [OVERDUE] Task ${task.id} sent successfully`);
+                    }
+
+                    // Telegram for overdue
+                    try {
+                        const user = await prisma.user.findUnique({
+                            where: { id: task.userId },
+                            select: { id: true, telegramChatId: true }
+                        });
+
+                        if (user && user.telegramChatId) {
+                            await telegramService.sendReminderNotification(task, user as any);
+                            console.log(`[TELEGRAM] Overdue Task ${task.id} notification sent`);
+                        }
+                    } catch (telegramError) {
+                        console.error(`[TELEGRAM_FAIL] Overdue Task ${task.id}`, telegramError);
+                    }
+
+                } catch (txError) {
+                    console.error(`[REMINDER_ENGINE] [OVERDUE_TX_FAIL] Task ${task.id}`, txError);
                 }
             }
         }

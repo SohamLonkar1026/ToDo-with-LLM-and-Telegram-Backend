@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LogOut, SlidersHorizontal, CalendarClock, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, LogOut, SlidersHorizontal, CalendarClock, MessageSquare, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useState } from 'react';
@@ -95,6 +95,21 @@ export default function Sidebar({ isOpen, setIsSidebarOpen }: { isOpen: boolean;
                             </span>
                         )}
                     </NavLink>
+
+                    <NavLink
+                        to="/settings"
+                        onClick={() => setIsSidebarOpen(false)}
+                        className={({ isActive }) =>
+                            `flex items-center gap-3 px-4 py-3 rounded-xl transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${isActive
+                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20 dark:shadow-blue-900/20'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`
+                        }
+                    >
+                        <SettingsIcon className="w-5 h-5" />
+                        <span className="font-medium">Settings</span>
+                    </NavLink>
+
                     <button
                         onClick={() => setIsTelegramModalOpen(true)}
                         className="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-all w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500"
