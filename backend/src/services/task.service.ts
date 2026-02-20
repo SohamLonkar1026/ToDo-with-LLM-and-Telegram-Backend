@@ -23,7 +23,7 @@ interface UpdateTaskInput {
 }
 
 export async function createTask(userId: string, data: CreateTaskInput) {
-    // Fetch user defaults to apply as fallbacks
+    // Fetch user defaults to apply as fallbacks when client omits values
     const userDefaults = await prisma.user.findUnique({
         where: { id: userId },
         select: {
