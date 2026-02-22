@@ -7,7 +7,9 @@ interface CreateTaskInput {
     dueDate: string;
     estimatedMinutes: number;
     priority?: Priority;
-    reminderOffsetMinutes?: number;
+    notifyBeforeHours?: number[];
+    notifyPercentage?: number[];
+    minGapMinutes?: number;
 }
 
 interface UpdateTaskInput {
@@ -17,10 +19,20 @@ interface UpdateTaskInput {
     estimatedMinutes?: number;
     priority?: Priority;
     status?: Status;
-    reminderOffsetMinutes?: number;
+    minGapMinutes?: number;
 }
 
 export async function createTask(userId: string, data: CreateTaskInput) {
+    // Fetch user defaults to apply as fallbacks when client omits values
+    const userDefaults = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            defaultNotifyBeforeHours: true,
+            defaultNotifyPercentage: true,
+            defaultMinGapMinutes: true,
+        },
+    });
+
     return prisma.task.create({
         data: {
             title: data.title,
@@ -28,7 +40,9 @@ export async function createTask(userId: string, data: CreateTaskInput) {
             dueDate: new Date(data.dueDate),
             estimatedMinutes: data.estimatedMinutes,
             priority: data.priority || "MEDIUM",
-            reminderOffsetMinutes: data.reminderOffsetMinutes ?? 60,
+            notifyBeforeHours: data.notifyBeforeHours ?? userDefaults?.defaultNotifyBeforeHours ?? [],
+            notifyPercentage: data.notifyPercentage ?? userDefaults?.defaultNotifyPercentage ?? [],
+            minGapMinutes: data.minGapMinutes ?? userDefaults?.defaultMinGapMinutes ?? 58,
             userId,
         },
     });
@@ -104,8 +118,8 @@ export async function updateTask(
             }),
             ...(data.priority !== undefined && { priority: data.priority }),
             ...(data.status !== undefined && { status: data.status }),
-            ...(data.reminderOffsetMinutes !== undefined && {
-                reminderOffsetMinutes: data.reminderOffsetMinutes,
+            ...(data.minGapMinutes !== undefined && {
+                minGapMinutes: data.minGapMinutes,
             }),
         },
     });
