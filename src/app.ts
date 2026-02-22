@@ -51,6 +51,11 @@ if (env.NODE_ENV !== 'production') {
 // Routes
 // ----------------------------------------------------------------------
 
+// Root health check (Railway default)
+app.get("/", (_req, res) => {
+    res.status(200).send("OK");
+});
+
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ success: true, message: "AI-MOM API is running." });
