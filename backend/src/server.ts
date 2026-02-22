@@ -4,6 +4,7 @@ import app from "./app";
 import env from "./config/env";
 import prisma from "./utils/prisma";
 import { startReminderJob } from "./jobs/reminder.job";
+import { startCleanupJob } from "./jobs/cleanup.job";
 import systemRoutes from "./routes/system.routes";
 
 // Monitoring Routes
@@ -23,7 +24,8 @@ async function startServer() {
 
         // 2. Initialize Scheduler (Once)
         startReminderJob();
-        console.log("[BOOT] Reminder scheduler initialized");
+        startCleanupJob();
+        console.log("[BOOT] Reminder & Cleanup schedulers initialized");
 
         // 3. Start Server
         console.log("PORT ENV:", process.env.PORT, "| Resolved PORT:", PORT);

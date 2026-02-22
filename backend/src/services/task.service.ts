@@ -117,7 +117,12 @@ export async function updateTask(
                 estimatedMinutes: data.estimatedMinutes,
             }),
             ...(data.priority !== undefined && { priority: data.priority }),
-            ...(data.status !== undefined && { status: data.status }),
+            ...(data.status !== undefined && {
+                status: data.status,
+                completedAt: data.status === "COMPLETED"
+                    ? (task.status === "COMPLETED" ? task.completedAt : new Date())
+                    : null
+            }),
             ...(data.minGapMinutes !== undefined && {
                 minGapMinutes: data.minGapMinutes,
             }),

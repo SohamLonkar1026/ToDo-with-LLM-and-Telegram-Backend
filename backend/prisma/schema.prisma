@@ -41,12 +41,14 @@ model Task {
   lastReminderSentAt    DateTime?
   reminderStagesSent    Json?              @default("[]")
   snoozedUntil          DateTime?
+  completedAt           DateTime?
   recurringTemplateId   String?
   notifications         Notification[]
   recurringTemplate     RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id])
   user                  User               @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([status, completedAt])
 }
 
 model RecurringTemplate {
