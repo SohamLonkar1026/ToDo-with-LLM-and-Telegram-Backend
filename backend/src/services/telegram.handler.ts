@@ -81,7 +81,7 @@ export const handleCallbackQuery = async (callback: any) => {
             const hours = parseInt(parts[1]);
             const taskId = parts[2];
 
-            if (isNaN(hours) || ![1, 3, 6, 12].includes(hours)) {
+            if (isNaN(hours) || ![1, 2].includes(hours)) {
                 console.warn("[TELEGRAM_HANDLER] Invalid snooze hours:", hours);
                 return;
             }
