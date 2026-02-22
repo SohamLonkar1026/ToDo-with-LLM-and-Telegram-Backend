@@ -26,6 +26,7 @@ async function startServer() {
         console.log("[BOOT] Reminder scheduler initialized");
 
         // 3. Start Server
+        console.log("PORT ENV:", process.env.PORT, "| Resolved PORT:", PORT);
         const server = app.listen(PORT, "0.0.0.0", () => {
             console.log(`[BOOT] Server started | PID: ${process.pid}`);
             console.log(`🚀 AI-MOM API running on http://localhost:${PORT}`);
