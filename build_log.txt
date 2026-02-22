@@ -1,6 +1,0 @@
-npm warn config production Use `--omit=dev` instead.
-src/controllers/snooze.controller.ts(17,22): error TS2322: Type 'string | string[]' is not assignable to type 'string | StringFilter<"Notification"> | undefined'.
-  Type 'string[]' is not assignable to type 'string | StringFilter<"Notification"> | undefined'.
-src/controllers/snooze.controller.ts(21,44): error TS2339: Property 'task' does not exist on type '{ id: string; createdAt: Date; userId: string; taskId: string; type: NotificationType; message: string; read: boolean; }'.
-src/controllers/snooze.controller.ts(28,22): error TS2322: Type 'string | string[]' is not assignable to type 'string | undefined'.
-  Type 'string[]' is not assignable to type 'string'.
