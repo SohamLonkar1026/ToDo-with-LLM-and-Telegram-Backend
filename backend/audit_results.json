@@ -1,0 +1,44 @@
+{
+  "userColumns": [
+    {
+      "column_name": "createdAt",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "email",
+      "data_type": "text"
+    },
+    {
+      "column_name": "id",
+      "data_type": "text"
+    },
+    {
+      "column_name": "password",
+      "data_type": "text"
+    },
+    {
+      "column_name": "telegramChatId",
+      "data_type": "text"
+    },
+    {
+      "column_name": "telegramLinkCode",
+      "data_type": "text"
+    },
+    {
+      "column_name": "telegramLinkExpiresAt",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "updatedAt",
+      "data_type": "timestamp without time zone"
+    }
+  ],
+  "migrations": [
+    {
+      "migration_name": "20260216134856_multi_stage_reminders"
+    },
+    {
+      "migration_name": "20260216083638_init_fresh"
+    }
+  ]
+}

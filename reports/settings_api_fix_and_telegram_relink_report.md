@@ -1,3 +1,48 @@
+# Settings API Fix & Telegram Re-Link Report
+
+**Date:** 2026-02-22  
+**Scope:** Frontend Settings API path correction + Backend Telegram link handler re-linking logic
+
+---
+
+## Summary of Changes
+
+Two issues were addressed in this session:
+
+1. **Frontend (`Settings.tsx`)** — The Axios API calls used `/api/settings/reminder-defaults`, but the `api` service instance already has `/api` as its `baseURL`. This caused requests to go to `/api/api/settings/...`, resulting in 404s. Both the `GET` and `PUT` paths were corrected to `/settings/reminder-defaults`.
+
+2. **Backend (`telegram.link.service.ts`)** — The `/link <code>` Telegram command previously rejected re-linking if the Telegram `chatId` was already associated with a different user. This was replaced with a clean re-linking approach: before linking, **all existing users** with that `chatId` have it cleared via `updateMany`, then the new user is linked. This ensures only one user has a given Telegram account at any time, allows clean re-linking, and prevents unique constraint crashes.
+
+---
+
+## Per-File Breakdown
+
+---
+
+### 1. `frontend/src/pages/Settings.tsx`
+
+**What changed:**  
+- Line 149: `api.get('/api/settings/reminder-defaults')` → `api.get('/settings/reminder-defaults')`
+- Line 175: `api.put('/api/settings/reminder-defaults', ...)` → `api.put('/settings/reminder-defaults', ...)`
+
+**Why it changed:**  
+The `api` Axios instance already includes `/api` as its `baseURL`. Using `/api/settings/...` caused a double-prefix (`/api/api/settings/...`), resulting in 404 errors from the backend.
+
+**Diff:**
+
+```diff
+-                const { data } = await api.get('/api/settings/reminder-defaults');
++                const { data } = await api.get('/settings/reminder-defaults');
+```
+
+```diff
+-            await api.put('/api/settings/reminder-defaults', {
++            await api.put('/settings/reminder-defaults', {
+```
+
+**Full Updated File:**
+
+```tsx
 import { useState, useRef, useEffect } from 'react';
 import { Settings as SettingsIcon, ChevronDown, Check } from 'lucide-react';
 import api from '../services/api';
@@ -269,3 +314,170 @@ export default function Settings() {
         </div>
     );
 }
+```
+
+---
+
+### 2. `backend/src/services/telegram.link.service.ts`
+
+**What changed:**  
+The `linkTelegramAccount` function's step 3 (collision check) was completely replaced. Previously it did a `findFirst` + conditional rejection; now it does an `updateMany` to clear any existing link before setting the new one.
+
+**Why it changed:**  
+The old logic rejected re-linking entirely if the `chatId` was already associated with a different user. This prevented legitimate re-linking scenarios (e.g., user switches accounts). The new approach:
+- Clears `telegramChatId` from **all** users who currently have it (via `updateMany`)
+- Then links it to the new user
+- Guarantees only ONE user has a given Telegram account at any time
+- Prevents unique constraint (`P2002`) crashes on insert
+
+**Diff:**
+
+```diff
+-    // 3. Collision Check: Is this chatId already linked to ANY user?
+-    const existingLink = await prisma.user.findFirst({
+-        where: { telegramChatId: chatId }
+-    });
+-
+-    // If linked to someone else, reject.
+-    // If linked to self (re-linking), allow overwrite/update.
+-    if (existingLink && existingLink.id !== user.id) {
+-        return { success: false, message: "❌ This Telegram account is already linked to another user." };
+-    }
+-
+-    // 4. Link Account (Overwrite safely)
++    // 3. Clear any existing link for this chatId (allows clean re-linking)
++    await prisma.user.updateMany({
++        where: { telegramChatId: chatId },
++        data: { telegramChatId: null }
++    });
++
++    // 4. Link Account
+     await prisma.user.update({
+         where: { id: user.id },
+         data: {
+             telegramChatId: chatId,
+-            telegramLinkCode: null,     // clear code
+-            telegramLinkExpiresAt: null // clear expiry
++            telegramLinkCode: null,
++            telegramLinkExpiresAt: null
+         }
+     });
+
+-    return { success: true, message: "✅ Telegram successfully linked to your account." };
++    return { success: true, message: "✅ Telegram account successfully linked." };
+```
+
+**Full Updated File:**
+
+```typescript
+
+import prisma from "../utils/prisma";
+
+/**
+ * Generates a unique 6-digit linking code for a user.
+ * Ensures uniqueness by checking against existing active codes.
+ * Sets expiry to 5 minutes from now.
+ */
+
+/**
+ * Generates a unique 6-digit linking code for a user.
+ * Ensures uniqueness by checking against existing active codes.
+ * Sets expiry to 5 minutes from now.
+ */
+export const generateLinkCode = async (userId: string): Promise<string> => {
+    let code = "";
+    let isUnique = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
+
+    // Loop until we generate a unique code and successfully update the user
+    while (!isUnique && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        // Generate 6-digit code (000000 - 999999)
+        code = Math.floor(100000 + Math.random() * 900000).toString();
+
+        try {
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+            // Try updating user with new code (Overwrite if exists)
+            // If code correlates to another user (unique constraint), this will throw
+            await prisma.user.update({
+                where: { id: userId },
+                data: {
+                    telegramLinkCode: code,
+                    telegramLinkExpiresAt: expiresAt
+                }
+            });
+            isUnique = true;
+        } catch (error: any) {
+            // Check for P2002 (Unique constraint failed)
+            if (error.code === 'P2002') {
+                console.warn(`[TELEGRAM LINK] Collision detected for code ${code}, retrying...`);
+                continue; // Retry loop
+            }
+            throw error; // Other errors should bubble up
+        }
+    }
+
+    if (!isUnique) {
+        throw new Error("Failed to generate unique linking code after multiple attempts.");
+    }
+
+    return code;
+};
+
+/**
+ * Links a Telegram account to a user using the 6-digit code.
+ * Validates expiration and collision with other accounts.
+ */
+export const linkTelegramAccount = async (code: string, chatId: string): Promise<{ success: boolean; message: string }> => {
+    // 1. Find user by code
+    const user = await prisma.user.findFirst({
+        where: { telegramLinkCode: code }
+    });
+
+    if (!user) {
+        return { success: false, message: "❌ Invalid or expired linking code." };
+    }
+
+    // 2. Check Expiry
+    if (!user.telegramLinkExpiresAt || user.telegramLinkExpiresAt < new Date()) {
+        // CLEANUP: specific expired code
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                telegramLinkCode: null,
+                telegramLinkExpiresAt: null
+            }
+        });
+        return { success: false, message: "❌ Invalid or expired linking code." };
+    }
+
+    // 3. Clear any existing link for this chatId (allows clean re-linking)
+    await prisma.user.updateMany({
+        where: { telegramChatId: chatId },
+        data: { telegramChatId: null }
+    });
+
+    // 4. Link Account
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            telegramChatId: chatId,
+            telegramLinkCode: null,
+            telegramLinkExpiresAt: null
+        }
+    });
+
+    return { success: true, message: "✅ Telegram account successfully linked." };
+};
+```
+
+---
+
+## Verification
+
+- ✅ Frontend `Settings.tsx` — Both `api.get` and `api.put` paths corrected and pushed to `origin/main`
+- ✅ Backend `telegram.link.service.ts` — Re-linking logic updated (not yet pushed to backend remote)
+- ✅ No other files were modified
+- ⚠️ Backend change has **not** been committed/pushed yet — only local
