@@ -86,8 +86,8 @@ export const handleCallbackQuery = async (callback: any) => {
                 return;
             }
 
-            const snoozeMs = hours * 60 * 60 * 1000;
-            const snoozedUntil = new Date(Date.now() + snoozeMs);
+            const snoozeMinutes = hours * 60;
+            const snoozedUntil = new Date(Date.now() + snoozeMinutes * 60 * 1000);
             const now = new Date();
 
             await prisma.task.update({
