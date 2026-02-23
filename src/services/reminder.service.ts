@@ -49,7 +49,60 @@ export const checkAndTriggerReminders = async () => {
                 continue; // Skip invalid tasks
             }
 
-            // 3️⃣ Add Empty Reminder Short-Circuit (Performance Optimization)
+            // ──────────────────────────────────────────────────────────
+            // 🔒 OVERDUE — DB-level atomic guard (runs BEFORE short-circuit)
+            // updateMany WHERE NOT { has: "overdue" } is re-evaluated
+            // after acquiring the row lock under READ COMMITTED.
+            // Only one cron cycle / replica wins. Zero app-level guards.
+            // ──────────────────────────────────────────────────────────
+            if (now > due) {
+                try {
+                    const claimed = await prisma.task.updateMany({
+                        where: {
+                            id: task.id,
+                            status: "PENDING",
+                            NOT: {
+                                reminderStagesSent: { has: "overdue" }
+                            }
+                        },
+                        data: {
+                            lastReminderSentAt: now,
+                            reminderStagesSent: { push: "overdue" }
+                        }
+                    });
+
+                    if (claimed.count === 1) {
+                        await prisma.notification.create({
+                            data: {
+                                userId: task.userId,
+                                taskId: task.id,
+                                type: NotificationType.OVERDUE,
+                                message: `Overdue: Task "${task.title}" is overdue!`
+                            }
+                        });
+
+                        console.log(`[OVERDUE] Task ${task.id} | PID: ${process.pid}`);
+
+                        // Telegram (fire & forget)
+                        try {
+                            const user = await prisma.user.findUnique({
+                                where: { id: task.userId },
+                                select: { id: true, telegramChatId: true }
+                            });
+                            if (user?.telegramChatId) {
+                                await telegramService.sendReminderNotification(task, user as any);
+                            }
+                        } catch (tgErr) {
+                            console.error(`[TELEGRAM_FAIL] Overdue ${task.id}`, tgErr);
+                        }
+                    }
+                } catch (err) {
+                    console.error(`[OVERDUE_TX_FAIL] Task ${task.id}`, err);
+                }
+            }
+
+            // 3️⃣ Empty Reminder Short-Circuit (Performance Optimization)
+            // Overdue is already handled above, so this only skips stage processing.
             if (
                 (!task.notifyBeforeHours || (task.notifyBeforeHours as number[]).length === 0) &&
                 (!task.notifyPercentage || (task.notifyPercentage as number[]).length === 0)
@@ -57,8 +110,8 @@ export const checkAndTriggerReminders = async () => {
                 continue;
             }
 
-            // 7️⃣ Native String[] — no JSON cast needed (cast removed after prisma generate)
-            const sentStages: string[] = (task.reminderStagesSent as unknown as string[]) ?? [];
+            // 7️⃣ Native String[] read
+            const sentStages: string[] = task.reminderStagesSent ?? [];
 
             // Generate candidate stages
             const stages: Stage[] = [];
@@ -175,67 +228,6 @@ export const checkAndTriggerReminders = async () => {
                 } catch (txError) {
                     console.error(`[REMINDER_ENGINE] [TX_FAIL] Task ${task.id}`, txError);
                     break;
-                }
-            }
-
-            // Handle overdue tasks (separate logic)
-            // 🔒 DB-level atomic guard: only one cron cycle wins the race.
-            // updateMany with NOT { has: "overdue" } means the WHERE clause
-            // is evaluated inside a row-locked transaction — if another cycle
-            // already appended "overdue", this returns count=0 and we skip.
-            const overdueLabel = "overdue";
-
-            if (!stageSent && now > due) {
-                try {
-                    const claimed = await prisma.task.updateMany({
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        where: {
-                            id: task.id,
-                            NOT: {
-                                reminderStagesSent: { has: overdueLabel }
-                            }
-                        } as any,
-                        data: {
-                            lastReminderSentAt: now,
-                            reminderStagesSent: { push: overdueLabel }
-                        }
-                    });
-
-                    // claimed.count === 0 means another cron cycle already sent it
-                    if (claimed.count === 0) {
-                        continue;
-                    }
-
-                    await prisma.notification.create({
-                        data: {
-                            userId: task.userId,
-                            taskId: task.id,
-                            type: NotificationType.OVERDUE,
-                            message: `Overdue: Task "${task.title}" is overdue!`
-                        }
-                    });
-
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log(`[REMINDER_ENGINE] [OVERDUE] Task ${task.id} sent successfully`);
-                    }
-
-                    // Telegram for overdue (fire & forget)
-                    try {
-                        const user = await prisma.user.findUnique({
-                            where: { id: task.userId },
-                            select: { id: true, telegramChatId: true }
-                        });
-
-                        if (user && user.telegramChatId) {
-                            await telegramService.sendReminderNotification(task, user as any);
-                            console.log(`[TELEGRAM] Overdue Task ${task.id} notification sent`);
-                        }
-                    } catch (telegramError) {
-                        console.error(`[TELEGRAM_FAIL] Overdue Task ${task.id}`, telegramError);
-                    }
-
-                } catch (txError) {
-                    console.error(`[REMINDER_ENGINE] [OVERDUE_TX_FAIL] Task ${task.id}`, txError);
                 }
             }
         }
