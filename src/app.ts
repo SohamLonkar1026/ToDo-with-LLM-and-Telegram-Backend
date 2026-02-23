@@ -19,19 +19,30 @@ console.log("🔥 DEPLOY VERSION: CORS FIX ACTIVE 🔥");
 // ----------------------------------------------------------------------
 // 🚨 CRITICAL: CORS MUST BE THE FIRST MIDDLEWARE
 // ----------------------------------------------------------------------
-app.use(
-    cors({
-        origin: [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "https://aimom-black.vercel.app"
-        ],
-        credentials: true
-    })
-);
+const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://aimom-black.vercel.app",
+    "https://taskora-solo.vercel.app"
+];
+
+const corsOptions: cors.CorsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true
+};
+
+app.use(cors(corsOptions));
 
 // Explicit Preflight Handling
-app.options("*", cors());
+app.options("*", cors(corsOptions));
 
 // ----------------------------------------------------------------------
 // Security & Body Parsing
@@ -58,7 +69,7 @@ app.get("/", (_req, res) => {
 
 // Health check
 app.get("/api/health", (_req, res) => {
-    res.json({ success: true, message: "AI-MOM API is running." });
+    res.json({ success: true, message: "Taskora API is running." });
 });
 
 // Webhook
