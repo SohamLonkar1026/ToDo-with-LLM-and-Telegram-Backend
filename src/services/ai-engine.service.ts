@@ -100,14 +100,19 @@ const TOOL_DEFINITIONS = [
     {
         name: "create_task",
         description:
-            "Create a new task. IMPORTANT: Extract a very short, concise title (3-5 words). Put all additional context/details into the description field.",
+            "Create a new task. CRITICAL RULES for title and description:\n" +
+            "- TITLE: Max 6-8 words. Action-oriented. No links. No full sentences. Example: 'Submit Product Management Quiz'\n" +
+            "- DESCRIPTION: Max 2-3 short lines summarizing what to do, deadline, and key instructions. Never dump raw message. Extract links and put them at the end under 'Links:' section.\n" +
+            "- If the user forwards a long message, aggressively summarize it. Prioritize clarity over completeness.",
         parameters: {
             type: "OBJECT",
             properties: {
                 title: {
                     type: "STRING",
                     description:
-                        "Short, concise title. Action + Object only (e.g., 'Meet Utkarsh', 'Buy Groceries'). Do NOT include full sentence.",
+                        "STRICT: Max 6-8 words. Action + Object only. No links, no dates, no full sentences. " +
+                        "Examples: 'Submit Product Management Quiz', 'Complete ML Assignment', 'Attend Workshop Session'. " +
+                        "BAD examples: 'Submit Product Quiz Complete and submit the Product Management...', 'Complete and submit the assignment before deadline'",
                 },
                 due_date: {
                     type: "STRING",
@@ -122,7 +127,11 @@ const TOOL_DEFINITIONS = [
                 },
                 description: {
                     type: "STRING",
-                    description: "Context, details, or original user message minus the title.",
+                    description:
+                        "STRICT: Max 2-3 short lines. Summarize: what to do, deadline, key instructions. " +
+                        "DO NOT copy the raw message. DO NOT repeat the title. " +
+                        "If links exist, extract only important ones and append at the end as:\n" +
+                        "Links:\n- <url1>\n- <url2>",
                 },
                 priority: {
                     type: "STRING",
@@ -300,7 +309,6 @@ ROLE:
 - Interpret user messages and call the appropriate tool to perform task operations.
 - Ask for clarification if the request is ambiguous.
 - Respond conversationally only when no task-related action is required.
-- **CRITICAL**: When creating tasks, keep the 'title' extremely short and concise (3-5 words max). Put all other details into 'description'.
 
 RULES:
 1. All time expressions are in Asia/Kolkata (IST) unless explicitly stated otherwise.
@@ -312,14 +320,53 @@ RULES:
    - Set **MEDIUM** (default) if no specific urgency mentioned.
 5. Always set confidence: "high" (clear intent+time), "medium" (minor inference), "low" (ambiguous).
 6. If confidence would be "low", ask a clarification question instead of calling a tool.
-7. For "medium" confidence calls, prepend your response with an explanation of what you assumed. Example: "Assuming you meant tomorrow at 5:00 PM, I've scheduled the task."
+7. For "medium" confidence calls, prepend your response with an explanation of what you assumed.
 8. When rescheduling, match user's description to a task ID from context.
+
+TITLE RULES (STRICT):
+- Max 6-8 words. Action-oriented.
+- No links, no dates, no full sentences.
+- Format: "[Action] [Object]" — e.g., "Submit Product Management Quiz"
+- NEVER use the entire message headline as the title.
+
+DESCRIPTION RULES (STRICT):
+- Max 2-3 short lines.
+- Summarize: what to do, deadline (if present), key instructions.
+- NEVER copy the raw message into description.
+- NEVER repeat the title in the description.
+- If links are present, extract only actionable links and append at the end:
+  Links:
+  - <url1>
+  - <url2>
+
+LONG MESSAGE / FORWARDED MESSAGE RULES:
+- When the user sends or forwards a long message (e.g., WhatsApp/Telegram announcements, class notices):
+  1. Extract the core action as a short title (6-8 words max).
+  2. Summarize the key information in 2-3 lines for description.
+  3. Extract important links and place them under "Links:" at the end.
+  4. Aggressively compress. Prioritize clarity over completeness.
+  5. Ignore non-actionable content (greetings, repeated info, disclaimers).
 
 EXAMPLES:
 - User: "Remind me to go meet Utkarsh tomorrow regarding the form"
-  -> Tool: create_task(title="Meet Utkarsh", description="Regarding the form", due_date="...")
+  -> create_task(title="Meet Utkarsh", description="Regarding the form", due_date="...")
+
 - User: "Buy milk and eggs from the store"
-  -> Tool: create_task(title="Buy milk and eggs", description="From the store", due_date="...")
+  -> create_task(title="Buy Milk and Eggs", description="From the store", due_date="...")
+
+- User forwards: "*Product Management* Dear students, Complete and submit the Product Management SetB quiz before 24th Feb 2026, 5:00 PM IST. Attendance will be marked only after you submit. Quiz link: https://forms.gle/abc123 Reference material: https://drive.google.com/xyz Please note: only one attempt allowed."
+  -> create_task(
+       title="Submit Product Management Quiz",
+       description="Complete and submit PM SetB quiz before 24 Feb 2026, 5:00 PM IST.\nAttendance marked only after submission. One attempt only.\n\nLinks:\n- https://forms.gle/abc123\n- https://drive.google.com/xyz",
+       due_date="2026-02-24T17:00:00+05:30"
+     )
+
+- User forwards: "Workshop on AI/ML by Prof. Sharma. Register by 25th Feb. Limited seats. Registration link: https://bit.ly/workshop123. Venue: Room 301, 3rd Floor, CS Building. Time: 10 AM to 4 PM on 28th Feb."
+  -> create_task(
+       title="Register for AI/ML Workshop",
+       description="Register by 25 Feb. Workshop on 28 Feb, 10 AM - 4 PM at Room 301, CS Building.\n\nLinks:\n- https://bit.ly/workshop123",
+       due_date="2026-02-25T23:59:00+05:30"
+     )
 
 Current Time: ${currentTimeISO}
 
