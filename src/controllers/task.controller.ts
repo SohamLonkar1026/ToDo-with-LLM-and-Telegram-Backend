@@ -8,7 +8,7 @@ export async function createTask(
     next: NextFunction
 ): Promise<void> {
     try {
-        const { title, description, dueDate, estimatedMinutes, priority, reminderOffsetMinutes } = req.body;
+        const { title, description, dueDate, estimatedMinutes, priority, minGapMinutes } = req.body;
 
         if (!title || !dueDate || estimatedMinutes === undefined) {
             res.status(400).json({
@@ -27,7 +27,7 @@ export async function createTask(
             dueDate,
             estimatedMinutes,
             priority,
-            reminderOffsetMinutes,
+            minGapMinutes,
         });
 
         res.status(201).json({ success: true, data: task });

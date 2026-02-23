@@ -10,6 +10,7 @@ import { errorMiddleware } from "./middleware/error.middleware";
 import env from "./config/env";
 import { telegramWebhook } from "./controllers/telegram.controller";
 import aiRoutes from "./routes/ai.routes";
+import settingsRoutes from "./routes/settings.routes";
 
 const app = express();
 
@@ -50,6 +51,11 @@ if (env.NODE_ENV !== 'production') {
 // Routes
 // ----------------------------------------------------------------------
 
+// Root health check (Railway default)
+app.get("/", (_req, res) => {
+    res.status(200).send("OK");
+});
+
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ success: true, message: "AI-MOM API is running." });
@@ -65,6 +71,7 @@ app.use("/api/recurring", recurringRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Centralized error handler
 app.use(errorMiddleware);

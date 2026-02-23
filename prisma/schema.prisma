@@ -19,6 +19,9 @@ model User {
   telegramChatId        String?             @unique
   telegramLinkCode      String?             @unique
   telegramLinkExpiresAt DateTime?
+  defaultNotifyBeforeHours  Int[]              @default([])
+  defaultNotifyPercentage   Int[]              @default([])
+  defaultMinGapMinutes      Int                @default(58)
 }
 
 model Task {
@@ -29,19 +32,23 @@ model Task {
   estimatedMinutes      Int
   priority              Priority           @default(MEDIUM)
   status                Status             @default(PENDING)
-  reminderOffsetMinutes Int                @default(60)
+  notifyBeforeHours     Int[]              @default([])
+  notifyPercentage      Int[]              @default([])
+  minGapMinutes         Int                @default(58)
   userId                String
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
   lastReminderSentAt    DateTime?
-  reminderStagesSent    Json?              @default("[]")
+  reminderStagesSent    String[]           @default([])
   snoozedUntil          DateTime?
+  completedAt           DateTime?
   recurringTemplateId   String?
   notifications         Notification[]
   recurringTemplate     RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id])
   user                  User               @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([status, completedAt])
 }
 
 model RecurringTemplate {

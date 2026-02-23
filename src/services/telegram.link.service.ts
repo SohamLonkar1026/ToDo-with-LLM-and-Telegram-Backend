@@ -81,26 +81,21 @@ export const linkTelegramAccount = async (code: string, chatId: string): Promise
         return { success: false, message: "❌ Invalid or expired linking code." };
     }
 
-    // 3. Collision Check: Is this chatId already linked to ANY user?
-    const existingLink = await prisma.user.findFirst({
-        where: { telegramChatId: chatId }
+    // 3. Clear any existing link for this chatId (allows clean re-linking)
+    await prisma.user.updateMany({
+        where: { telegramChatId: chatId },
+        data: { telegramChatId: null }
     });
 
-    // If linked to someone else, reject. 
-    // If linked to self (re-linking), allow overwrite/update.
-    if (existingLink && existingLink.id !== user.id) {
-        return { success: false, message: "❌ This Telegram account is already linked to another user." };
-    }
-
-    // 4. Link Account (Overwrite safely)
+    // 4. Link Account
     await prisma.user.update({
         where: { id: user.id },
         data: {
             telegramChatId: chatId,
-            telegramLinkCode: null,     // clear code
-            telegramLinkExpiresAt: null // clear expiry
+            telegramLinkCode: null,
+            telegramLinkExpiresAt: null
         }
     });
 
-    return { success: true, message: "✅ Telegram successfully linked to your account." };
+    return { success: true, message: "✅ Telegram account successfully linked." };
 };

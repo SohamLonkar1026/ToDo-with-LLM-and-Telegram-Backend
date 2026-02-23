@@ -71,12 +71,8 @@ export const sendReminderNotification = async (task: Task, user: User & { telegr
         const inlineKeyboard = {
             inline_keyboard: [
                 [
-                    { text: "1h 💤", callback_data: `SNOOZE_1_${task.id}` },
-                    { text: "3h 💤", callback_data: `SNOOZE_3_${task.id}` },
-                ],
-                [
-                    { text: "6h 💤", callback_data: `SNOOZE_6_${task.id}` },
-                    { text: "12h 💤", callback_data: `SNOOZE_12_${task.id}` },
+                    { text: "1h", callback_data: `SNOOZE_1_${task.id}` },
+                    { text: "2h", callback_data: `SNOOZE_2_${task.id}` },
                 ]
             ]
         };
