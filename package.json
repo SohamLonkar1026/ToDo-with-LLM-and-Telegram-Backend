@@ -6,7 +6,7 @@
   "scripts": {
     "build": "prisma generate && tsc",
     "dev": "nodemon --exec ts-node src/server.ts",
-    "start": "prisma migrate resolve --applied 20260223_fix_reminder_stages_array && prisma migrate deploy && node dist/server.js",
+    "start": "node dist/server.js",
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:generate": "npx prisma generate",
     "prisma:studio": "npx prisma studio"
