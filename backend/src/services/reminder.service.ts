@@ -57,10 +57,8 @@ export const checkAndTriggerReminders = async () => {
                 continue;
             }
 
-            // 7️⃣ Defensive JSON Handling
-            const sentStages: string[] = Array.isArray(task.reminderStagesSent)
-                ? (task.reminderStagesSent as string[])
-                : [];
+            // 7️⃣ Native String[] — no JSON cast needed (cast removed after prisma generate)
+            const sentStages: string[] = (task.reminderStagesSent as unknown as string[]) ?? [];
 
             // Generate candidate stages
             const stages: Stage[] = [];
@@ -181,36 +179,47 @@ export const checkAndTriggerReminders = async () => {
             }
 
             // Handle overdue tasks (separate logic)
+            // 🔒 DB-level atomic guard: only one cron cycle wins the race.
+            // updateMany with NOT { has: "overdue" } means the WHERE clause
+            // is evaluated inside a row-locked transaction — if another cycle
+            // already appended "overdue", this returns count=0 and we skip.
             const overdueLabel = "overdue";
-            const overdueAlreadySent = sentStages.includes(overdueLabel);
 
-            if (!stageSent && now > due && !overdueAlreadySent) {
+            if (!stageSent && now > due) {
                 try {
-                    await prisma.$transaction([
-                        prisma.task.update({
-                            where: { id: task.id },
-                            data: {
-                                lastReminderSentAt: now,
-                                reminderStagesSent: {
-                                    push: overdueLabel
-                                }
+                    const claimed = await prisma.task.updateMany({
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        where: {
+                            id: task.id,
+                            NOT: {
+                                reminderStagesSent: { has: overdueLabel }
                             }
-                        }),
-                        prisma.notification.create({
-                            data: {
-                                userId: task.userId,
-                                taskId: task.id,
-                                type: NotificationType.OVERDUE,
-                                message: `Overdue: Task "${task.title}" is overdue!`
-                            }
-                        })
-                    ]);
+                        } as any,
+                        data: {
+                            lastReminderSentAt: now,
+                            reminderStagesSent: { push: overdueLabel }
+                        }
+                    });
+
+                    // claimed.count === 0 means another cron cycle already sent it
+                    if (claimed.count === 0) {
+                        continue;
+                    }
+
+                    await prisma.notification.create({
+                        data: {
+                            userId: task.userId,
+                            taskId: task.id,
+                            type: NotificationType.OVERDUE,
+                            message: `Overdue: Task "${task.title}" is overdue!`
+                        }
+                    });
 
                     if (process.env.NODE_ENV !== 'production') {
                         console.log(`[REMINDER_ENGINE] [OVERDUE] Task ${task.id} sent successfully`);
                     }
 
-                    // Telegram for overdue
+                    // Telegram for overdue (fire & forget)
                     try {
                         const user = await prisma.user.findUnique({
                             where: { id: task.userId },
