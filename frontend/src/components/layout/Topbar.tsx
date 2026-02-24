@@ -10,7 +10,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     const name = userEmail ? userEmail.split('@')[0] : 'User';
 
     return (
-        <header className="h-16 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10 w-full transition-colors dark:bg-slate-900/80 dark:border-slate-800 bg-white/80 border-slate-200">
+        <header className="h-16 bg-white/90 backdrop-blur-md border-b border-slate-200 dark:bg-slate-900/80 dark:border-slate-800 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10 w-full transition-colors duration-300 shadow-sm dark:shadow-none">
             <div className="flex items-center gap-4">
                 <button
                     onClick={onMenuClick}
