@@ -27,3 +27,13 @@ export const markAsRead = async (req: AuthRequest, res: Response, next: NextFunc
         next(error);
     }
 };
+
+export const markAllAsRead = async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.userId!;
+        const result = await notificationService.markAllAsRead(userId);
+        res.json({ success: true, data: { count: result.count } });
+    } catch (error) {
+        next(error);
+    }
+};

@@ -6,6 +6,7 @@ import * as snoozeController from "../controllers/snooze.controller";
 const router = Router();
 
 router.get("/", authenticate, notificationController.getNotifications);
+router.put("/read-all", authenticate, notificationController.markAllAsRead);
 router.put("/:id/read", authenticate, notificationController.markAsRead);
 router.post("/:id/snooze", authenticate, snoozeController.snoozeNotification);
 
