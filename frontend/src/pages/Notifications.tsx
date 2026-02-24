@@ -4,7 +4,7 @@ import { useNotifications } from '../context/NotificationContext';
 import api from '../services/api';
 
 export default function Notifications() {
-    const { notifications, loading, markAsRead, refreshNotifications, setNotifications } = useNotifications(); // Added setNotifications
+    const { notifications, loading, markAsRead, refreshNotifications, setNotifications, clearAllNotifications } = useNotifications();
 
     useEffect(() => {
         refreshNotifications();
@@ -44,7 +44,17 @@ export default function Notifications() {
 
     return (
         <div className="p-8 max-w-4xl mx-auto">
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-8">Notifications</h1>
+            <div className="flex items-center justify-between mb-8">
+                <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Notifications</h1>
+                {notifications.length > 0 && (
+                    <button
+                        onClick={clearAllNotifications}
+                        className="px-4 py-2 text-sm font-medium rounded-lg border transition-colors text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 border-red-200 dark:border-red-500/30"
+                    >
+                        Clear All
+                    </button>
+                )}
+            </div>
 
             {notifications.length === 0 ? (
                 <Card className="text-center py-12 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 shadow-sm dark:shadow-none">

@@ -16,6 +16,7 @@ interface NotificationContextType {
     markAsRead: (id: string) => Promise<void>;
     refreshNotifications: () => Promise<void>;
     setNotifications: React.Dispatch<React.SetStateAction<Notification[]>>;
+    clearAllNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -57,9 +58,18 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const clearAllNotifications = async () => {
+        try {
+            setNotifications([]);
+            await api.delete('/notifications');
+        } catch (error) {
+            console.error('Failed to clear notifications', error);
+            await fetchNotifications();
+        }
+    };
+
     useEffect(() => {
         fetchNotifications();
-        // Poll every minute to keep counts updated
         const interval = setInterval(fetchNotifications, 60000);
         return () => clearInterval(interval);
     }, []);
@@ -67,7 +77,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const unreadCount = notifications.filter(n => !n.read).length;
 
     return (
-        <NotificationContext.Provider value={{ notifications, unreadCount, loading, markAsRead, refreshNotifications: fetchNotifications, setNotifications }}>
+        <NotificationContext.Provider value={{ notifications, unreadCount, loading, markAsRead, refreshNotifications: fetchNotifications, setNotifications, clearAllNotifications }}>
             {children}
         </NotificationContext.Provider>
     );

@@ -27,3 +27,13 @@ export const markAsRead = async (req: AuthRequest, res: Response, next: NextFunc
         next(error);
     }
 };
+
+export const clearAll = async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.userId!;
+        const result = await notificationService.clearAllNotifications(userId);
+        res.json({ success: true, data: { deleted: result.count } });
+    } catch (error) {
+        next(error);
+    }
+};

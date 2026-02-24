@@ -8,5 +8,6 @@ const router = Router();
 router.get("/", authenticate, notificationController.getNotifications);
 router.put("/:id/read", authenticate, notificationController.markAsRead);
 router.post("/:id/snooze", authenticate, snoozeController.snoozeNotification);
+router.delete("/", authenticate, notificationController.clearAll);
 
 export default router;

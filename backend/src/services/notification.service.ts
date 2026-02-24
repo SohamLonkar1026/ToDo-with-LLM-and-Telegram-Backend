@@ -27,3 +27,9 @@ export const markAsRead = async (userId: string, notificationId: string, unread:
         data: { read: !unread },
     });
 };
+
+export const clearAllNotifications = async (userId: string) => {
+    return prisma.notification.deleteMany({
+        where: { userId },
+    });
+};
