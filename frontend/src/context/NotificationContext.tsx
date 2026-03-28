@@ -14,6 +14,7 @@ interface NotificationContextType {
     unreadCount: number;
     loading: boolean;
     markAsRead: (id: string) => Promise<void>;
+    markAllAsRead: () => Promise<void>;
     refreshNotifications: () => Promise<void>;
     setNotifications: React.Dispatch<React.SetStateAction<Notification[]>>;
 }
@@ -53,7 +54,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             await api.put(`/notifications/${id}/read`, { unread: !newStatus });
         } catch (error) {
             console.error('Failed to toggle read status', error);
-            // Revert on error (could implement, skipping for brevity)
+        }
+    };
+
+    const markAllAsRead = async () => {
+        try {
+            setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+            await api.put('/notifications/read-all');
+        } catch (error) {
+            console.error('Failed to mark all as read', error);
+            fetchNotifications(); // Revert on error
         }
     };
 
@@ -67,7 +77,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const unreadCount = notifications.filter(n => !n.read).length;
 
     return (
-        <NotificationContext.Provider value={{ notifications, unreadCount, loading, markAsRead, refreshNotifications: fetchNotifications, setNotifications }}>
+        <NotificationContext.Provider value={{ notifications, unreadCount, loading, markAsRead, markAllAsRead, refreshNotifications: fetchNotifications, setNotifications }}>
             {children}
         </NotificationContext.Provider>
     );

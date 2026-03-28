@@ -35,7 +35,7 @@ export default function Login() {
             <Card className="w-full max-w-md">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-                    <p className="text-slate-400">Sign in to continue to AI-MOM</p>
+                    <p className="text-slate-400">Sign in to continue to Taskora</p>
                 </div>
 
                 {error && (

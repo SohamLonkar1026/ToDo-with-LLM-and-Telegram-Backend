@@ -21,9 +21,10 @@ export default function Sidebar({ isOpen, setIsSidebarOpen }: { isOpen: boolean;
                 flex flex-col
             `}>
                 <div className="p-6">
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-400 dark:from-blue-400 dark:to-blue-600 bg-clip-text text-transparent">
-                        AI-MOM
+                    <h1 className="text-3xl font-bold tracking-widest uppercase bg-gradient-to-r from-blue-600 to-blue-400 dark:from-blue-400 dark:to-blue-600 bg-clip-text text-transparent">
+                        Taskora
                     </h1>
+                    <p className="text-sm text-slate-400 mt-1">by Soham Lonkar</p>
                 </div>
 
                 <nav className="flex-1 px-4 py-4 space-y-2">

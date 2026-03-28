@@ -35,7 +35,7 @@ export default function TaskCard({ task, onComplete, onDelete }: TaskCardProps) 
     };
 
     return (
-        <div className={`p-4 rounded-xl border transition-all hover:shadow-lg animate-fade-in w-full lg:max-w-2xl ${isCompleted
+        <div className={`p-4 rounded-xl border transition-all hover:shadow-lg animate-fade-in w-full lg:max-w-2xl overflow-hidden ${isCompleted
             ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 opacity-75'
             : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
             }`}>
@@ -47,11 +47,11 @@ export default function TaskCard({ task, onComplete, onDelete }: TaskCardProps) 
                     >
                         {isCompleted ? <CheckCircle className="w-5 h-5 text-green-500" /> : <Circle className="w-5 h-5" />}
                     </button>
-                    <div>
+                    <div className="min-w-0 flex-1">
                         <h3 className={`font-semibold text-lg ${isCompleted ? 'line-through text-slate-500' : 'text-white'}`}>
                             {task.title}
                         </h3>
-                        {task.description && <p className="text-slate-400 text-sm mt-1">{task.description}</p>}
+                        {task.description && <p className="text-slate-400 text-sm mt-1 break-all whitespace-pre-line">{task.description}</p>}
                     </div>
                 </div>
                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${priorityColors[task.priority]}`}>

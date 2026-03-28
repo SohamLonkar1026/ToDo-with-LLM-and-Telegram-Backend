@@ -4,7 +4,7 @@ import { useNotifications } from '../context/NotificationContext';
 import api from '../services/api';
 
 export default function Notifications() {
-    const { notifications, loading, markAsRead, refreshNotifications, setNotifications } = useNotifications(); // Added setNotifications
+    const { notifications, loading, markAsRead, markAllAsRead, refreshNotifications, setNotifications } = useNotifications(); // Added setNotifications
 
     useEffect(() => {
         refreshNotifications();
@@ -33,6 +33,8 @@ export default function Notifications() {
         }
     };
 
+    const hasUnread = notifications.some(n => !n.read);
+
     if (loading) {
         return (
             <div className="p-8 text-center">
@@ -44,7 +46,17 @@ export default function Notifications() {
 
     return (
         <div className="p-8 max-w-4xl mx-auto">
-            <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-8">Notifications</h1>
+            <div className="flex items-center justify-between mb-8">
+                <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Notifications</h1>
+                {hasUnread && (
+                    <button
+                        onClick={markAllAsRead}
+                        className="px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 hover:text-blue-400 border border-blue-500/20"
+                    >
+                        Mark All as Read
+                    </button>
+                )}
+            </div>
 
             {notifications.length === 0 ? (
                 <Card className="text-center py-12 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 shadow-sm dark:shadow-none">
