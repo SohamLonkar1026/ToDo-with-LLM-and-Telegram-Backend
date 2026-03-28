@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import Razorpay from "razorpay";
 import authRoutes from "./routes/auth.routes";
 import taskRoutes from "./routes/task.routes";
 import recurringRoutes from "./routes/recurring.routes";
@@ -11,6 +12,11 @@ import env from "./config/env";
 import { telegramWebhook } from "./controllers/telegram.controller";
 import aiRoutes from "./routes/ai.routes";
 import settingsRoutes from "./routes/settings.routes";
+
+const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID as string,
+    key_secret: process.env.RAZORPAY_KEY_SECRET as string,
+});
 
 const app = express();
 
@@ -24,7 +30,8 @@ const allowedOrigins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://aimom-black.vercel.app",
-    "https://taskora-solo.vercel.app"
+    "https://taskora-solo.vercel.app",
+    env.FRONTEND_URL
 ];
 
 const corsOptions: cors.CorsOptions = {
@@ -67,6 +74,11 @@ app.get("/", (_req, res) => {
     res.status(200).send("OK");
 });
 
+// Auto-ping health check for cron-job.org
+app.get('/health', (req, res) => {
+    res.send('OK');
+});
+
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ success: true, message: "Taskora API is running." });
@@ -83,6 +95,22 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/settings", settingsRoutes);
+
+// Razorpay — Create Order
+app.post("/create-order", async (req, res) => {
+    try {
+        const options = {
+            amount: 30000, // ₹300 in paise
+            currency: "INR",
+            receipt: "telegram_lifetime_" + Date.now(),
+        };
+        const order = await razorpay.orders.create(options);
+        res.json(order);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Order creation failed" });
+    }
+});
 
 // Centralized error handler
 app.use(errorMiddleware);
