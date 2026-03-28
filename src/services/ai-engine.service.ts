@@ -510,7 +510,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
         let response;
         try {
             response = await openai.chat.completions.create({
-                model: "gpt-4.1",
+                model: "gpt-4o",
                 messages: [
                     { role: "system", content: systemPrompt },
                     {
