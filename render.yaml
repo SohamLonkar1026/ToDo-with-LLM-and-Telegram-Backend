@@ -1,0 +1,27 @@
+services:
+  # Database Service
+  - type: pgo
+    name: ai-mom-db
+    plan: free
+
+  # Backend Web Service
+  - type: web
+    name: ai-mom-api
+    env: node
+    plan: free
+    repo: https://github.com/SohamLonkar1026/ToDo-with-LLM-and-Telegram-Backend
+    region: singapore
+    rootDir: backend
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-mom-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: "https://ai-mom-app.vercel.app"  # Update this to your actual Vercel URL
