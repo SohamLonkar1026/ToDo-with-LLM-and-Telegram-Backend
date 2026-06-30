@@ -1,13 +1,13 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import prisma from "../utils/prisma";
+import * as userRepository from "../repositories/user.repository";
 import env from "../config/env";
 
 const SALT_ROUNDS = 10;
 
 export async function registerUser(email: string, password: string) {
     const normalizedEmail = email.toLowerCase().trim();
-    const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const existingUser = await userRepository.findByEmail(normalizedEmail);
 
     if (existingUser) {
         throw { status: 409, message: "User with this email already exists." };
@@ -15,9 +15,15 @@ export async function registerUser(email: string, password: string) {
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const user = await prisma.user.create({
-        data: { email: normalizedEmail, password: hashedPassword },
-    });
+    let user;
+    try {
+        user = await userRepository.createUser({ email: normalizedEmail, password: hashedPassword });
+    } catch (err: any) {
+        if (err.status === 409) {
+            throw { status: 409, message: "User with this email already exists." };
+        }
+        throw err;
+    }
 
     const token = generateToken(user.id);
 
@@ -26,7 +32,7 @@ export async function registerUser(email: string, password: string) {
 
 export async function loginUser(email: string, password: string) {
     const normalizedEmail = email.toLowerCase().trim();
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const user = await userRepository.findByEmail(normalizedEmail);
 
     if (!user) {
         throw { status: 401, message: "Invalid email or password." };

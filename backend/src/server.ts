@@ -2,7 +2,7 @@ console.log("🚀 IST DEPLOY CHECK");
 
 import app from "./app";
 import env from "./config/env";
-import prisma from "./utils/prisma";
+import db from "./utils/firestore";
 import { startReminderJob } from "./jobs/reminder.job";
 import { startCleanupJob } from "./jobs/cleanup.job";
 import systemRoutes from "./routes/system.routes";
@@ -15,12 +15,11 @@ const PORT = env.PORT;
 
 async function startServer() {
     try {
-        // 1. Connect to Database
-        await prisma.$connect();
+        // 1. Verify Firestore connectivity
+        await db.listCollections();
         if (env.NODE_ENV !== 'production') {
-            console.log("✅ [BOOT] Database connected");
+            console.log("✅ [BOOT] Firestore connected");
         }
-        console.log('[PRISMA_SINGLETON_ACTIVE]');
 
         // 2. Initialize Scheduler (Once)
         startReminderJob();
@@ -42,7 +41,7 @@ async function startServer() {
         process.on('SIGTERM', async () => {
             console.log('[SHUTDOWN] Closing server...');
             server.close(async () => {
-                await prisma.$disconnect();
+                await db.terminate();
                 console.log('[SHUTDOWN] Server closed');
                 process.exit(0);
             });

@@ -10,7 +10,7 @@ import telegramRoutes from "./routes/telegram.routes";
 import { errorMiddleware } from "./middleware/error.middleware";
 import env from "./config/env";
 import { telegramWebhook } from "./controllers/telegram.controller";
-import prisma from "./utils/prisma";
+import * as userRepository from "./repositories/user.repository";
 import aiRoutes from "./routes/ai.routes";
 import settingsRoutes from "./routes/settings.routes";
 
@@ -81,12 +81,12 @@ app.get('/health', (req, res) => {
     res.send('OK');
 });
 
-// Health check with Database Ping (Keeps Render AND Neon awake)
+// Health check with Database Ping
 app.get("/api/health", async (_req, res) => {
     try {
-        // Microscopic query to wake up the database
-        await prisma.user.count();
-        res.json({ 
+        // Microscopic query to verify Firestore connectivity
+        await userRepository.countUsers();
+        res.json({
             success: true, 
             message: "Taskora API & Database are live.",
             timestamp: new Date().toISOString()

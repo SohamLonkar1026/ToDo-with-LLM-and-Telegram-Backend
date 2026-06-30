@@ -1,17 +1,7 @@
-import prisma from "../utils/prisma";
+import * as notificationRepository from "../repositories/notification.repository";
 
 export const getNotifications = async (userId: string, page: number = 1, limit: number = 20) => {
-    const skip = (page - 1) * limit;
-
-    const [notifications, totalCount] = await prisma.$transaction([
-        prisma.notification.findMany({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            skip,
-            take: limit
-        }),
-        prisma.notification.count({ where: { userId } })
-    ]);
+    const { notifications, totalCount } = await notificationRepository.findPaginatedByUser(userId, page, limit);
 
     return {
         notifications,
@@ -22,15 +12,14 @@ export const getNotifications = async (userId: string, page: number = 1, limit: 
 };
 
 export const markAsRead = async (userId: string, notificationId: string, unread: boolean = false) => {
-    return prisma.notification.update({
-        where: { id: notificationId, userId },
-        data: { read: !unread },
-    });
+    const notification = await notificationRepository.findByIdForUser(notificationId, userId);
+    if (!notification) {
+        throw { status: 404, message: "Notification not found." };
+    }
+    return notificationRepository.update(notificationId, { read: !unread });
 };
 
 export const markAllAsRead = async (userId: string) => {
-    return prisma.notification.updateMany({
-        where: { userId, read: false },
-        data: { read: true },
-    });
+    const count = await notificationRepository.updateManyUnreadToRead(userId);
+    return { count };
 };

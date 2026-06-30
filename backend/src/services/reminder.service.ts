@@ -1,5 +1,5 @@
-import { NotificationType, Task } from "@prisma/client";
-import prisma from "../utils/prisma";
+import * as taskRepository from "../repositories/task.repository";
+import * as userRepository from "../repositories/user.repository";
 import * as telegramService from "./telegram.service";
 
 // 2️⃣ Cron Execution Contract
@@ -18,15 +18,7 @@ export const checkAndTriggerReminders = async () => {
 
     try {
         // 3️⃣ Task Eligibility Rules
-        const tasks = await prisma.task.findMany({
-            where: {
-                status: "PENDING",
-                OR: [
-                    { snoozedUntil: null },
-                    { snoozedUntil: { lte: now } }
-                ]
-            }
-        });
+        const tasks = await taskRepository.findPendingEligibleForReminder(now);
 
         if (tasks.length > 5000) {
             console.warn(`[REMINDER_ENGINE][SAFETY_WARNING] Large task batch detected: ${tasks.length} tasks.`);
@@ -50,45 +42,27 @@ export const checkAndTriggerReminders = async () => {
             }
 
             // ──────────────────────────────────────────────────────────
-            // 🔒 OVERDUE — DB-level atomic guard (runs BEFORE short-circuit)
-            // updateMany WHERE NOT { has: "overdue" } is re-evaluated
-            // after acquiring the row lock under READ COMMITTED.
+            // 🔒 OVERDUE — Firestore transactional atomic guard
             // Only one cron cycle / replica wins. Zero app-level guards.
             // ──────────────────────────────────────────────────────────
             if (now > due) {
                 try {
-                    const claimed = await prisma.task.updateMany({
-                        where: {
-                            id: task.id,
-                            status: "PENDING",
-                            NOT: {
-                                reminderStagesSent: { has: "overdue" }
-                            }
-                        },
-                        data: {
-                            lastReminderSentAt: now,
-                            reminderStagesSent: { push: "overdue" }
-                        }
-                    });
+                    const claimed = await taskRepository.claimOverdueStage(task.id, now);
 
-                    if (claimed.count === 1) {
-                        await prisma.notification.create({
-                            data: {
-                                userId: task.userId,
-                                taskId: task.id,
-                                type: NotificationType.OVERDUE,
-                                message: `Overdue: Task "${task.title}" is overdue!`
-                            }
+                    if (claimed) {
+                        await taskRepository.sendStageTransaction(task.id, "overdue", now, {
+                            userId: task.userId,
+                            taskId: task.id,
+                            type: "OVERDUE",
+                            message: `Overdue: Task "${task.title}" is overdue!`,
+                            read: false,
                         });
 
                         console.log(`[OVERDUE] Task ${task.id} | PID: ${process.pid}`);
 
                         // Telegram (fire & forget)
                         try {
-                            const user = await prisma.user.findUnique({
-                                where: { id: task.userId },
-                                select: { id: true, telegramChatId: true }
-                            });
+                            const user = await userRepository.findById(task.userId);
                             if (user?.telegramChatId) {
                                 await telegramService.sendReminderNotification(task, user as any);
                             }
@@ -154,8 +128,6 @@ export const checkAndTriggerReminders = async () => {
             stages.sort((a, b) => a.triggerTime.getTime() - b.triggerTime.getTime());
 
             // 8️⃣ Eligibility Filtering & 9️⃣ Anti-Flood Protection
-            let stageSent = false;
-
             for (const stage of stages) {
                 // 8️⃣ Eligibility Filtering
                 const isEligibleTime = stage.triggerTime.getTime() <= now.getTime() &&
@@ -183,25 +155,13 @@ export const checkAndTriggerReminders = async () => {
                 const message = `Reminder: Task "${task.title}" - ${stage.label}`;
 
                 try {
-                    await prisma.$transaction([
-                        prisma.task.update({
-                            where: { id: task.id },
-                            data: {
-                                lastReminderSentAt: now,
-                                reminderStagesSent: {
-                                    push: stage.label
-                                }
-                            }
-                        }),
-                        prisma.notification.create({
-                            data: {
-                                userId: task.userId,
-                                taskId: task.id,
-                                type: NotificationType.REMINDER,
-                                message: message
-                            }
-                        })
-                    ]);
+                    await taskRepository.sendStageTransaction(task.id, stage.label, now, {
+                        userId: task.userId,
+                        taskId: task.id,
+                        type: "REMINDER",
+                        message,
+                        read: false,
+                    });
 
                     if (process.env.NODE_ENV !== 'production') {
                         console.log(`[REMINDER_ENGINE] [STAGE_${stage.label}] Task ${task.id} sent successfully`);
@@ -209,10 +169,7 @@ export const checkAndTriggerReminders = async () => {
 
                     // Telegram Notification (Fire & Forget)
                     try {
-                        const user = await prisma.user.findUnique({
-                            where: { id: task.userId },
-                            select: { id: true, telegramChatId: true }
-                        });
+                        const user = await userRepository.findById(task.userId);
 
                         if (user && user.telegramChatId) {
                             await telegramService.sendReminderNotification(task, user as any);
@@ -222,7 +179,6 @@ export const checkAndTriggerReminders = async () => {
                         console.error(`[TELEGRAM_FAIL] Task ${task.id}`, telegramError);
                     }
 
-                    stageSent = true;
                     break; // 🔟 One Stage Per Task Per Cron Cycle
 
                 } catch (txError) {

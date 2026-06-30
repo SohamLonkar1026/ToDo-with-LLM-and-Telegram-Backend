@@ -1,4 +1,5 @@
-import prisma from "../utils/prisma";
+import * as userRepository from "../repositories/user.repository";
+import * as taskRepository from "../repositories/task.repository";
 import * as navigationService from "./telegram.navigation";
 import * as linkService from "./telegram.link.service";
 import { sendMessage } from "./telegram.service";
@@ -36,7 +37,7 @@ export const handleMessage = async (message: any) => {
 
         // 2. START COMMAND (/start)
         if (text === "/start") {
-            const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
+            const user = await userRepository.findByTelegramChatId(chatId);
             if (user) {
                 await navigationService.sendMainMenu(chatId);
             } else {
@@ -47,7 +48,7 @@ export const handleMessage = async (message: any) => {
 
         // 3. MENU COMMAND (/menu)
         if (text === "/menu") {
-            const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
+            const user = await userRepository.findByTelegramChatId(chatId);
             if (!user) {
                 await sendMessage(chatId, "❌ Please link your account first.\nType <code>/link &lt;code&gt;</code>.");
                 return;
@@ -90,12 +91,9 @@ export const handleCallbackQuery = async (callback: any) => {
             const snoozedUntil = new Date(Date.now() + snoozeMinutes * 60 * 1000);
             const now = new Date();
 
-            await prisma.task.update({
-                where: { id: taskId },
-                data: {
-                    snoozedUntil: snoozedUntil,
-                    lastReminderSentAt: now,
-                },
+            await taskRepository.updateById(taskId, {
+                snoozedUntil: snoozedUntil,
+                lastReminderSentAt: now,
             });
 
             await fetch(`${BASE_URL}/answerCallbackQuery`, {
@@ -120,7 +118,7 @@ export const handleCallbackQuery = async (callback: any) => {
         }
 
         // Verify user for Navigation/Done
-        const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
+        const user = await userRepository.findByTelegramChatId(chatId);
         if (!user) return;
 
         // 2. MARK DONE Logic

@@ -1,4 +1,3 @@
-import prisma from "../utils/prisma";
 import { formatInTimeZone } from "date-fns-tz";
 import { fromZonedTime } from "date-fns-tz";
 import * as taskService from "./task.service";
@@ -154,6 +153,9 @@ async function executeRescheduleTask(userId: string, args: any): Promise<ToolRes
         const updatedTask = await taskService.updateTask(userId, args.task_id, {
             dueDate: utcISO,
         });
+        if (!updatedTask) {
+            throw { status: 404 };
+        }
 
         const newDateIST = formatIST(dateCheck.utcDate!);
 

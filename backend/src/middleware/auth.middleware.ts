@@ -10,7 +10,7 @@ interface JwtPayload {
     userId: string;
 }
 
-import prisma from "../utils/prisma";
+import * as userRepository from "../repositories/user.repository";
 
 export async function authMiddleware(
     req: AuthRequest,
@@ -30,10 +30,7 @@ export async function authMiddleware(
         const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
 
         // Verify user exists in DB
-        const user = await prisma.user.findUnique({
-            where: { id: decoded.userId },
-            select: { id: true }
-        });
+        const user = await userRepository.findById(decoded.userId);
 
         if (!user) {
             res.status(401).json({ success: false, message: "User no longer exists." });

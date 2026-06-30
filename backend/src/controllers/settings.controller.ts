@@ -1,25 +1,22 @@
 import { Response } from "express";
-import prisma from "../utils/prisma";
+import * as userRepository from "../repositories/user.repository";
 import { AuthRequest } from "../middleware/auth.middleware";
 
 export const getReminderDefaults = async (req: AuthRequest, res: Response) => {
     try {
         const userId = req.userId!;
 
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            select: {
-                defaultNotifyBeforeHours: true,
-                defaultNotifyPercentage: true,
-                defaultMinGapMinutes: true,
-            },
-        });
+        const user = await userRepository.findById(userId);
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        return res.json(user);
+        return res.json({
+            defaultNotifyBeforeHours: user.defaultNotifyBeforeHours,
+            defaultNotifyPercentage: user.defaultNotifyPercentage,
+            defaultMinGapMinutes: user.defaultMinGapMinutes,
+        });
     } catch (error) {
         console.error("[GET_REMINDER_DEFAULTS]", error);
         return res.status(500).json({ message: "Internal server error" });
@@ -109,21 +106,17 @@ export const updateReminderDefaults = async (req: AuthRequest, res: Response) =>
         const cleanedHours = [...new Set(defaultNotifyBeforeHours as number[])].sort((a, b) => a - b);
         const cleanedPercent = [...new Set(defaultNotifyPercentage as number[])].sort((a, b) => a - b);
 
-        const updatedUser = await prisma.user.update({
-            where: { id: userId },
-            data: {
-                defaultNotifyBeforeHours: cleanedHours,
-                defaultNotifyPercentage: cleanedPercent,
-                defaultMinGapMinutes,
-            },
-            select: {
-                defaultNotifyBeforeHours: true,
-                defaultNotifyPercentage: true,
-                defaultMinGapMinutes: true,
-            },
+        const updatedUser = await userRepository.updateUser(userId, {
+            defaultNotifyBeforeHours: cleanedHours,
+            defaultNotifyPercentage: cleanedPercent,
+            defaultMinGapMinutes,
         });
 
-        return res.json(updatedUser);
+        return res.json({
+            defaultNotifyBeforeHours: updatedUser?.defaultNotifyBeforeHours,
+            defaultNotifyPercentage: updatedUser?.defaultNotifyPercentage,
+            defaultMinGapMinutes: updatedUser?.defaultMinGapMinutes,
+        });
     } catch (error) {
         console.error("[UPDATE_REMINDER_DEFAULTS]", error);
         return res.status(500).json({ message: "Internal server error" });

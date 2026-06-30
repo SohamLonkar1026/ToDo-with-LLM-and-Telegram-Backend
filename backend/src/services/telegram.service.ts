@@ -1,6 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz";
 import env from "../config/env";
-import { Task, User } from "@prisma/client";
+import { Task, User } from "../repositories/types";
 
 // ... (existing constants)
 

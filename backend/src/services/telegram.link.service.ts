@@ -1,11 +1,5 @@
 
-import prisma from "../utils/prisma";
-
-/**
- * Generates a unique 6-digit linking code for a user.
- * Ensures uniqueness by checking against existing active codes.
- * Sets expiry to 5 minutes from now.
- */
+import * as userRepository from "../repositories/user.repository";
 
 /**
  * Generates a unique 6-digit linking code for a user.
@@ -24,26 +18,14 @@ export const generateLinkCode = async (userId: string): Promise<string> => {
         // Generate 6-digit code (000000 - 999999)
         code = Math.floor(100000 + Math.random() * 900000).toString();
 
-        try {
-            const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-            // Try updating user with new code (Overwrite if exists)
-            // If code correlates to another user (unique constraint), this will throw
-            await prisma.user.update({
-                where: { id: userId },
-                data: {
-                    telegramLinkCode: code,
-                    telegramLinkExpiresAt: expiresAt
-                }
-            });
+        // Try claiming the code (fails atomically if another user already holds it)
+        const claimed = await userRepository.setTelegramLinkCode(userId, code, expiresAt);
+        if (claimed) {
             isUnique = true;
-        } catch (error: any) {
-            // Check for P2002 (Unique constraint failed)
-            if (error.code === 'P2002') {
-                console.warn(`[TELEGRAM LINK] Collision detected for code ${code}, retrying...`);
-                continue; // Retry loop
-            }
-            throw error; // Other errors should bubble up
+        } else {
+            console.warn(`[TELEGRAM LINK] Collision detected for code ${code}, retrying...`);
         }
     }
 
@@ -60,9 +42,7 @@ export const generateLinkCode = async (userId: string): Promise<string> => {
  */
 export const linkTelegramAccount = async (code: string, chatId: string): Promise<{ success: boolean; message: string }> => {
     // 1. Find user by code
-    const user = await prisma.user.findFirst({
-        where: { telegramLinkCode: code }
-    });
+    const user = await userRepository.findByTelegramLinkCode(code);
 
     if (!user) {
         return { success: false, message: "❌ Invalid or expired linking code." };
@@ -71,31 +51,12 @@ export const linkTelegramAccount = async (code: string, chatId: string): Promise
     // 2. Check Expiry
     if (!user.telegramLinkExpiresAt || user.telegramLinkExpiresAt < new Date()) {
         // CLEANUP: specific expired code
-        await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                telegramLinkCode: null,
-                telegramLinkExpiresAt: null
-            }
-        });
+        await userRepository.clearTelegramLinkCode(user.id);
         return { success: false, message: "❌ Invalid or expired linking code." };
     }
 
-    // 3. Clear any existing link for this chatId (allows clean re-linking)
-    await prisma.user.updateMany({
-        where: { telegramChatId: chatId },
-        data: { telegramChatId: null }
-    });
-
-    // 4. Link Account
-    await prisma.user.update({
-        where: { id: user.id },
-        data: {
-            telegramChatId: chatId,
-            telegramLinkCode: null,
-            telegramLinkExpiresAt: null
-        }
-    });
+    // 3. Link Account (also clears any existing link for this chatId, allowing clean re-linking)
+    await userRepository.linkTelegramChat(user.id, chatId);
 
     return { success: true, message: "✅ Telegram account successfully linked." };
 };

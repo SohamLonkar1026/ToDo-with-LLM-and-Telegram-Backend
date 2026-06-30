@@ -1,5 +1,5 @@
 
-import prisma from "../utils/prisma";
+import * as conversationSessionRepository from "../repositories/conversationSession.repository";
 
 export interface ConversationSessionData {
     title?: string;
@@ -10,25 +10,11 @@ export interface ConversationSessionData {
 
 export const createSession = async (chatId: string, step: string, partialData: ConversationSessionData) => {
     // Upsert to ensure one session per user
-    return await prisma.conversationSession.upsert({
-        where: { telegramChatId: chatId },
-        update: {
-            step: step,
-            partialData: partialData as any,
-            updatedAt: new Date()
-        },
-        create: {
-            telegramChatId: chatId,
-            step: step,
-            partialData: partialData as any
-        }
-    });
+    return await conversationSessionRepository.upsert(chatId, step, partialData as any);
 };
 
 export const getSession = async (chatId: string) => {
-    return await prisma.conversationSession.findUnique({
-        where: { telegramChatId: chatId }
-    });
+    return await conversationSessionRepository.get(chatId);
 };
 
 export const updateSession = async (chatId: string, step: string, partialDataToMerge: Partial<ConversationSessionData>) => {
@@ -38,13 +24,7 @@ export const updateSession = async (chatId: string, step: string, partialDataToM
     const currentData = session.partialData as ConversationSessionData;
     const newData = { ...currentData, ...partialDataToMerge };
 
-    return await prisma.conversationSession.update({
-        where: { telegramChatId: chatId },
-        data: {
-            step: step,
-            partialData: newData as any
-        }
-    });
+    return await conversationSessionRepository.update(chatId, step, newData as any);
 };
 
 /**
@@ -52,9 +32,7 @@ export const updateSession = async (chatId: string, step: string, partialDataToM
  */
 export const deleteSession = async (chatId: string) => {
     try {
-        await prisma.conversationSession.delete({
-            where: { telegramChatId: chatId }
-        });
+        await conversationSessionRepository.deleteSession(chatId);
     } catch (e) {
         // Ignore if already deleted
     }

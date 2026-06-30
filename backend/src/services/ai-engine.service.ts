@@ -1,4 +1,5 @@
-import prisma from "../utils/prisma";
+import * as userRepository from "../repositories/user.repository";
+import * as taskRepository from "../repositories/task.repository";
 import { sendMessage } from "./telegram.service";
 import { executeTool } from "./tool-executor.service";
 import { formatInTimeZone } from "date-fns-tz";
@@ -275,12 +276,9 @@ function validateToolCall(
 
 async function buildTaskContext(userId: string): Promise<string> {
     try {
-        const tasks = await prisma.task.findMany({
-            where: { userId, status: "PENDING" },
-            orderBy: { dueDate: "asc" },
-            take: 10,
-            select: { id: true, title: true, dueDate: true, priority: true },
-        });
+        const allTasks = await taskRepository.findManyByUserStatus(userId, "PENDING");
+        allTasks.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+        const tasks = allTasks.slice(0, 10);
 
         if (tasks.length === 0) return "User has no pending tasks.";
 
@@ -490,7 +488,7 @@ export async function processMessage(chatId: string, userText: string): Promise<
         }
 
         // 1. Look up user
-        const user = await prisma.user.findFirst({ where: { telegramChatId: chatId } });
+        const user = await userRepository.findByTelegramChatId(chatId);
         if (!user) {
             await sendMessage(chatId, "❌ Please link your account first.\nType <code>/link &lt;code&gt;</code>.");
             return;

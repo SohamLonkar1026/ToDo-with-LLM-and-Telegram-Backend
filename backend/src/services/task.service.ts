@@ -1,5 +1,6 @@
-import prisma from "../utils/prisma";
-import { Priority, Status } from "@prisma/client";
+import * as taskRepository from "../repositories/task.repository";
+import * as userRepository from "../repositories/user.repository";
+import { Priority, Status } from "../repositories/types";
 
 interface CreateTaskInput {
     title: string;
@@ -24,41 +25,33 @@ interface UpdateTaskInput {
 
 export async function createTask(userId: string, data: CreateTaskInput) {
     // Fetch user defaults to apply as fallbacks when client omits values
-    const userDefaults = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-            defaultNotifyBeforeHours: true,
-            defaultNotifyPercentage: true,
-            defaultMinGapMinutes: true,
-        },
-    });
+    const user = await userRepository.findById(userId);
 
-    return prisma.task.create({
-        data: {
-            title: data.title,
-            description: data.description,
-            dueDate: new Date(data.dueDate),
-            estimatedMinutes: data.estimatedMinutes,
-            priority: data.priority || "MEDIUM",
-            notifyBeforeHours: data.notifyBeforeHours ?? userDefaults?.defaultNotifyBeforeHours ?? [],
-            notifyPercentage: data.notifyPercentage ?? userDefaults?.defaultNotifyPercentage ?? [],
-            minGapMinutes: data.minGapMinutes ?? userDefaults?.defaultMinGapMinutes ?? 58,
-            userId,
-        },
+    return taskRepository.create({
+        title: data.title,
+        description: data.description ?? null,
+        dueDate: new Date(data.dueDate),
+        estimatedMinutes: data.estimatedMinutes,
+        priority: data.priority || "MEDIUM",
+        status: "PENDING",
+        notifyBeforeHours: data.notifyBeforeHours ?? user?.defaultNotifyBeforeHours ?? [],
+        notifyPercentage: data.notifyPercentage ?? user?.defaultNotifyPercentage ?? [],
+        minGapMinutes: data.minGapMinutes ?? user?.defaultMinGapMinutes ?? 58,
+        userId,
+        lastReminderSentAt: null,
+        reminderStagesSent: [],
+        snoozedUntil: null,
+        completedAt: null,
+        recurringTemplateId: null,
     });
 }
 
 export async function getTasksByUser(userId: string) {
-    return prisma.task.findMany({
-        where: { userId, recurringTemplateId: null },
-        orderBy: { dueDate: "asc" },
-    });
+    return taskRepository.findManyByUserExcludingRecurring(userId);
 }
 
 export async function getTasksByPriority(userId: string) {
-    const tasks = await prisma.task.findMany({
-        where: { userId, recurringTemplateId: null },
-    });
+    const tasks = await taskRepository.findManyByUserExcludingRecurringUnsorted(userId);
 
     // In-memory sort: Start By Time (DueDate - EstimatedMinutes)
     tasks.sort((a, b) => {
@@ -83,9 +76,7 @@ export async function getTasksByPriority(userId: string) {
 }
 
 export async function getTaskById(userId: string, taskId: string) {
-    const task = await prisma.task.findFirst({
-        where: { id: taskId, userId },
-    });
+    const task = await taskRepository.findByIdForUser(taskId, userId);
 
     if (!task) {
         throw { status: 404, message: "Task not found." };
@@ -99,45 +90,39 @@ export async function updateTask(
     taskId: string,
     data: UpdateTaskInput
 ) {
-    const task = await prisma.task.findFirst({
-        where: { id: taskId, userId },
-    });
+    const task = await taskRepository.findByIdForUser(taskId, userId);
 
     if (!task) {
         throw { status: 404, message: "Task not found." };
     }
 
-    return prisma.task.update({
-        where: { id: taskId },
-        data: {
-            ...(data.title !== undefined && { title: data.title }),
-            ...(data.description !== undefined && { description: data.description }),
-            ...(data.dueDate !== undefined && { dueDate: new Date(data.dueDate) }),
-            ...(data.estimatedMinutes !== undefined && {
-                estimatedMinutes: data.estimatedMinutes,
-            }),
-            ...(data.priority !== undefined && { priority: data.priority }),
-            ...(data.status !== undefined && {
-                status: data.status,
-                completedAt: data.status === "COMPLETED"
-                    ? (task.status === "COMPLETED" ? task.completedAt : new Date())
-                    : null
-            }),
-            ...(data.minGapMinutes !== undefined && {
-                minGapMinutes: data.minGapMinutes,
-            }),
-        },
+    return taskRepository.updateById(taskId, {
+        ...(data.title !== undefined && { title: data.title }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.dueDate !== undefined && { dueDate: new Date(data.dueDate) }),
+        ...(data.estimatedMinutes !== undefined && {
+            estimatedMinutes: data.estimatedMinutes,
+        }),
+        ...(data.priority !== undefined && { priority: data.priority }),
+        ...(data.status !== undefined && {
+            status: data.status,
+            completedAt: data.status === "COMPLETED"
+                ? (task.status === "COMPLETED" ? task.completedAt : new Date())
+                : null
+        }),
+        ...(data.minGapMinutes !== undefined && {
+            minGapMinutes: data.minGapMinutes,
+        }),
     });
 }
 
 export async function deleteTask(userId: string, taskId: string) {
-    const task = await prisma.task.findFirst({
-        where: { id: taskId, userId },
-    });
+    const task = await taskRepository.findByIdForUser(taskId, userId);
 
     if (!task) {
         throw { status: 404, message: "Task not found." };
     }
 
-    return prisma.task.delete({ where: { id: taskId } });
+    await taskRepository.deleteById(taskId);
+    return task;
 }

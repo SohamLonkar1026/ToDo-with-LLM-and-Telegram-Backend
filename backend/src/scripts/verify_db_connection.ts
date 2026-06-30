@@ -1,21 +1,17 @@
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import db from "../utils/firestore";
+import * as userRepository from "../repositories/user.repository";
 
 async function main() {
-    console.log("Attempting to connect to database...");
+    console.log("Attempting to connect to Firestore...");
     try {
-        await prisma.$connect();
-        console.log("✅ Successfully connected to the database!");
-        // Optional: Run a simple query
-        const count = await prisma.user.count();
+        await db.listCollections();
+        console.log("✅ Successfully connected to Firestore!");
+        const count = await userRepository.countUsers();
         console.log(`Current user count: ${count}`);
     } catch (error) {
         console.error("❌ Failed to connect:", error);
         process.exit(1);
-    } finally {
-        await prisma.$disconnect();
     }
 }
 
