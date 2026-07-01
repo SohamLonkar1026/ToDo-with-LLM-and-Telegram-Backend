@@ -75,13 +75,6 @@
       ]
     },
     {
-      "collectionGroup": "notifications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "taskId", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "recurringTemplates",
       "queryScope": "COLLECTION",
       "fields": [
